@@ -1,6 +1,7 @@
 """ Feature engineering-related functions. """
 
 import pandas as pd
+import numpy as np
 
 from typing import Iterable
 from pandas.tseries.offsets import DateOffset
@@ -73,7 +74,7 @@ def attach_store_data(df: pd.DataFrame, stores: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
-def make_lag_df(df: pd.DataFrame, lag: DateOffset) -> pd.DataFrame:
+def _make_lag_df(df: pd.DataFrame, lag: DateOffset) -> pd.DataFrame:
     """
     Create a lagged version of a time-indexed DataFrame, reshaped for feature generation.
 
@@ -96,7 +97,7 @@ def make_lag_df(df: pd.DataFrame, lag: DateOffset) -> pd.DataFrame:
         the original index name and column name, and columns:
         - The lagged value column named like `"lag_<unit>_<amount>"` (e.g., `"lag_days_7"`).
     """
-        
+
     id_name = df.index.name
     value_name = "_".join(f"lag_{k}_{v}" for k, v in lag.kwds.items())
     melt_index = [df.index.name, df.columns.name]
@@ -144,7 +145,7 @@ def make_lags(df: pd.DataFrame, lags: DateOffset | Iterable[DateOffset]) -> pd.D
                          values=df.columns[2])
                 .sort_index()) # Sorted from oldest to newest
 
-    lag_dfs = [make_lag_df(df_pivot, lag) for lag in lags]
+    lag_dfs = [_make_lag_df(df_pivot, lag) for lag in lags]
     lag_df = pd.concat(lag_dfs, axis=1).reset_index()
 
     # we need to merge with the input dataframe to keep only the dates
@@ -185,3 +186,122 @@ def make_targets(df: pd.DataFrame, horizon: int) -> pd.DataFrame:
     lag_df = make_lags(df, date_lags)
 
     return lag_df
+
+def _make_window_df(df: pd.DataFrame, window: int, lag: int) -> pd.DataFrame:
+    """
+    Create a long-format DataFrame containing rolling mean values over a specified window and lag.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Input DataFrame containing time series or sequential data. The DataFrame's index
+        should represent the time or sequence dimension.
+    window : int
+        The size of the rolling window (in number of observations).
+    lag : int
+        A lag identifier used only for naming the resulting column; it does not affect
+        computation directly.
+
+    Returns
+    -------
+    pandas.DataFrame
+        A long-format DataFrame with the rolling mean values. The index will be a
+        MultiIndex composed of the original index name and the column name, and the
+        resulting column will be named
+        ``rolling_mean_days_{window}_lag_{lag}``.
+
+    """
+
+    melt_index = [df.index.name, df.columns.name]
+    id_name = df.index.name
+
+    wdf = (df
+           .rolling(window=window).mean()
+           .reset_index()
+           .melt(id_vars=[id_name], value_name=f"rolling_mean_days_{window}_lag_{lag}")
+           .set_index(melt_index))
+    
+    return wdf
+
+def make_rolling(df: pd.DataFrame, windows: int | Iterable[int], lag: int = 1) -> pd.DataFrame:
+    """
+    Compute rolling mean features for one or more window sizes, with an optional lag shift.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Input DataFrame in long format, with at least three columns:
+        - The first column is used as the index (typically a date or time field).
+        - The second column represents variable names (categories or series).
+        - The third column contains the numeric values to aggregate.
+    windows : int or iterable of int
+        Rolling window size(s) in number of observations (e.g., 3, 7, or [3, 7, 14]).
+        If a single integer is passed, it is automatically wrapped in a list.
+    lag : int
+        Number of days (or time units) to lag the data before computing rolling
+        statistics.
+
+    Returns
+    -------
+    pandas.DataFrame
+        A DataFrame containing the original date/variable/value columns along
+        with new rolling mean columns for each specified window and lag. Each
+        rolling column is named according to the pattern:
+        ``rolling_mean_days_{window}_lag_{lag}``.
+
+    Notes
+    -----
+    - The function relies on a helper function `_make_window_df()` to compute
+      each individual rolling mean DataFrame.
+    - The index is expected to represent ordered dates or times; sorting is
+      applied to ensure chronological order.
+    - The lag operation shifts the time index forward by the specified number
+      of days.
+    """
+
+    if not isinstance(windows, list):
+        windows = [windows]
+
+    df_pivot = (pd.pivot(df,
+                        index=df.columns[0],
+                        columns=df.columns[1],
+                        values=df.columns[2])
+                        .sort_index()  # Sorted from oldest to newest
+                        .shift(freq=DateOffset(days=lag)))  # single-day-lag
+
+    window_dfs = [_make_window_df(df_pivot, window=w, lag=lag) for w in windows]
+    window_df = pd.concat(window_dfs, axis=1).reset_index()
+
+    # we need to merge with the input dataframe to keep only the dates
+    # that appear on the input dataframe.
+    window_df_merged = df.merge(window_df, how='left').loc[:, window_df.columns]
+
+    return window_df_merged
+
+def make_cyclic(s: pd.Series, period: int) -> pd.DataFrame:
+    """
+    Convert a periodic numeric pandas Series into its cyclic (sin and cos) representation.
+
+    Parameters
+    ----------
+    s : pd.Series
+        Input pandas Series containing numeric values representing a cyclic variable 
+        (e.g., month numbers, hours of day, days of week).
+    period : int
+        The period of the cycle (e.g., 24 for hours, 7 for days of week, 12 for months).
+
+    Returns
+    -------
+    pd.DataFrame
+        A DataFrame with two columns:
+        - `<s.name>_sin`: sine transformation of the input series.
+        - `<s.name>_cos`: cosine transformation of the input series.
+    """
+
+    cyclic_df = pd.concat([np.sin(2 * np.pi * s / period),
+                        np.cos(2 * np.pi * s / period)],
+                        axis=1)
+
+    cyclic_df.columns=[f'{s.name}_sin', f'{s.name}_cos']
+
+    return cyclic_df
