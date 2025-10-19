@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 
 from typing import Iterable
+from functools import reduce
 from pandas.tseries.offsets import DateOffset
 
 def _in_promo2(row, date_col: str, interval_col: str, start_promo_date_col: str):
@@ -41,12 +42,6 @@ def attach_store_data(df: pd.DataFrame, stores: pd.DataFrame) -> pd.DataFrame:
     """
     Merge store-level metadata into the main DataFrame and compute active Promo2 flags.
 
-    This function joins transactional or daily sales data (`df`) with store metadata (`stores`)
-    on the `'Store'` column. After merging, it determines whether each observation falls within
-    an active Promo2 period using the `_in_promo2()` helper function, encoding the result as an
-    integer indicator (1 for active, 0 for inactive). The `PromoInterval` column is dropped
-    after processing to prevent duplication.
-
     Parameters
     ----------
     df : pd.DataFrame
@@ -74,42 +69,7 @@ def attach_store_data(df: pd.DataFrame, stores: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
-def _make_lag_df(df: pd.DataFrame, lag: DateOffset) -> pd.DataFrame:
-    """
-    Create a lagged version of a time-indexed DataFrame, reshaped for feature generation.
-
-    This function shifts the input DataFrame by a specified pandas `DateOffset` (e.g., `pd.DateOffset(days=7)`),
-    then melts the result into a long format suitable for merging or stacking multiple lagged features.
-    The lag offset parameters are encoded into the column name of the lagged values.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Input DataFrame with a DatetimeIndex (or time-based index) and one or more columns of values.
-    lag : pd.DateOffset
-        The pandas DateOffset object defining the temporal lag to apply
-        (e.g., `pd.DateOffset(days=7)`, `pd.DateOffset(weeks=1)`).
-
-    Returns
-    -------
-    pd.DataFrame
-        A melted DataFrame containing the lagged values, with a multi-index consisting of
-        the original index name and column name, and columns:
-        - The lagged value column named like `"lag_<unit>_<amount>"` (e.g., `"lag_days_7"`).
-    """
-
-    id_name = df.index.name
-    value_name = "_".join(f"lag_{k}_{v}" for k, v in lag.kwds.items())
-    melt_index = [df.index.name, df.columns.name]
-
-    lag_df = (df.shift(freq=lag)
-              .reset_index()
-              .melt(id_vars=[id_name], value_name=value_name)
-              .set_index(melt_index))
-
-    return lag_df
-
-def make_lags(df: pd.DataFrame, lags: int | Iterable[int]) -> pd.DataFrame:
+def _make_lags(df: pd.DataFrame, lags: int | Iterable[int]) -> pd.DataFrame:
     """
     Generate and merge multiple lagged feature DataFrames based on one or more DateOffset objects.
 
@@ -120,9 +80,8 @@ def make_lags(df: pd.DataFrame, lags: int | Iterable[int]) -> pd.DataFrame:
         1. A time or index column (used for pivot index),
         2. A category or variable column (used for pivot columns),
         3. A value column (used for pivot values).
-    lags : pd.DateOffset or Iterable[pd.DateOffset]
-        One or more pandas DateOffset objects specifying the temporal lags to apply,
-        e.g. `pd.DateOffset(days=7)` or `[pd.DateOffset(days=7), pd.DateOffset(weeks=2)]`.
+    lags : int or Iterable[int]
+        One or more pandas DateOffset objects specifying the temporal lags to apply.
 
     Returns
     -------
@@ -136,22 +95,34 @@ def make_lags(df: pd.DataFrame, lags: int | Iterable[int]) -> pd.DataFrame:
     - The input DataFrame must be sorted in ascending time order.
     """
 
-    if isinstance(lags, DateOffset):
+    if isinstance(lags, int):
         lags = [lags]
 
-    df_pivot = (
+    df_p = (
         pd.pivot(df, index=df.columns[0], columns=df.columns[1], values=df.columns[2])
         .sort_index() # Sorted from oldest to newest
-        ) 
+    )
 
-    lag_dfs = [_make_lag_df(df_pivot, DateOffset(days=lag)) for lag in lags]
-    lag_df = pd.concat(lag_dfs, axis=1).reset_index()
+    id_name = df_p.index.name
+    melt_index = [df_p.index.name, df_p.columns.name]
+    lag_dfs = []
+    for lag in lags:
+        lag_offset = DateOffset(days=lag)
+        value_name = "_".join(f"lag_{k}_{v}" for k, v in lag_offset.kwds.items())
+
+        lag_df = (df_p.shift(freq=lag_offset)
+                .reset_index()
+                .melt(id_vars=[id_name], value_name=value_name)
+                .set_index(melt_index))
+
+        lag_dfs.append(lag_df)
 
     # we need to merge with the input dataframe to keep only the dates
-    # that appear on the input dataframe.
-    lag_df_merged = df.merge(lag_df, how='left').loc[:, lag_df.columns]
+    # that appear on the input dataframe and preserve row order.
+    lag_df = pd.concat(lag_dfs, axis=1).reset_index()
+    lag_df = df.merge(lag_df, how='left').loc[:, lag_df.columns]
 
-    return lag_df_merged
+    return lag_df
 
 def make_targets(df: pd.DataFrame, horizon: int) -> pd.DataFrame:
     """
@@ -177,51 +148,11 @@ def make_targets(df: pd.DataFrame, horizon: int) -> pd.DataFrame:
     """
 
     lags = range(-1, -(horizon + 1), -1)
-    lag_df = make_lags(df, lags)
+    lag_df = _make_lags(df, lags)
 
     return lag_df
 
-def _make_window_df(df: pd.DataFrame, window: int) -> pd.DataFrame:
-    """
-    Create a long-format DataFrame containing rolling mean values over a specified window and lag.
-
-    Parameters
-    ----------
-    df : pandas.DataFrame
-        Input DataFrame containing time series or sequential data. The DataFrame's index
-        should represent the time or sequence dimension.
-    window : int
-        The size of the rolling window (in number of observations).
-
-    Returns
-    -------
-    pandas.DataFrame
-        A long-format DataFrame with the rolling mean values. The index will be a
-        MultiIndex composed of the original index name and the column name, and the
-        resulting column will be named
-        ``rolling_mean_days_{window}_lag_{lag}``.
-
-    """
-
-    roll = df.rolling(window=window)
-    id_name = df.index.name
-    melt_index = [df.index.name, df.columns.name]
-    melt = lambda df, name: (df.reset_index()
-                             .melt(id_vars=[id_name], value_name=name)
-                             .set_index(melt_index))
-
-    feature_list = [
-        melt(roll.mean(), name=f"roll_mean_days_{window}"),
-        melt(roll.std(), name=f"roll_std_days_{window}"),
-        melt(roll.skew(), name=f"roll_skew_days_{window}"),
-        melt(roll.kurt(), name=f"roll_kurt_days_{window}"),
-        melt(roll.max(), name=f"roll_max_days_{window}")
-    ]
-    window_features = pd.concat(feature_list, axis=1)
-    
-    return window_features
-
-def make_rolling(df: pd.DataFrame, windows: int | Iterable[int], lag: int = 1) -> pd.DataFrame:
+def _make_rolling(df: pd.DataFrame, windows: int | Iterable[int], lag: int = 1) -> pd.DataFrame:
     """
     Compute rolling mean features for one or more window sizes, with an optional lag shift.
 
@@ -260,22 +191,40 @@ def make_rolling(df: pd.DataFrame, windows: int | Iterable[int], lag: int = 1) -
     if not isinstance(windows, list):
         windows = [windows]
 
-    df_pivot = (
+    df_p = (
         pd.pivot(df, index=df.columns[0], columns=df.columns[1], values=df.columns[2])
         .sort_index()  # Sorted from oldest to newest
         .shift(freq=DateOffset(days=lag))  # single-day-lag
     )
 
-    window_dfs = [_make_window_df(df_pivot, window=w) for w in windows]
-    window_df = pd.concat(window_dfs, axis=1).reset_index()
+    feature_dfs = []
+    id_name = df_p.index.name
+    melt_index = [df_p.index.name, df_p.columns.name]
+    melt = lambda df, name: (df.reset_index()
+                            .melt(id_vars=[id_name], value_name=name)
+                            .set_index(melt_index))
+    
+    for w in windows:
+        roll = df_p.rolling(window=w)
+
+        feature_list = pd.concat([
+            melt(roll.mean(), name=f"roll_mean_days_{w}"),
+            melt(roll.std(), name=f"roll_std_days_{w}"),
+            melt(roll.skew(), name=f"roll_skew_days_{w}"),
+            melt(roll.kurt(), name=f"roll_kurt_days_{w}"),
+            melt(roll.max(), name=f"roll_max_days_{w}")
+        ], axis=1)
+        
+        feature_dfs.append(feature_list)
 
     # we need to merge with the input dataframe to keep only the dates
-    # that appear on the input dataframe.
-    window_df_merged = df.merge(window_df, how='left').loc[:, window_df.columns]
+    # that appear on the input dataframe and preserve row order.
+    feature_df = pd.concat(feature_dfs, axis=1).reset_index()
+    feature_df = df.merge(feature_df, how='left').loc[:, feature_df.columns]
 
-    return window_df_merged
+    return feature_df
 
-def make_cyclic(s: pd.Series, period: int) -> pd.DataFrame:
+def _make_cyclic(s: pd.Series, period: int) -> pd.DataFrame:
     """
     Convert a periodic numeric pandas Series into its cyclic (sin and cos) representation.
 
@@ -303,7 +252,7 @@ def make_cyclic(s: pd.Series, period: int) -> pd.DataFrame:
 
     return cyclic_df
 
-def make_differences(df: pd.DataFrame, diffs: int | Iterable[int], lag: int = 1) -> pd.DataFrame:
+def _make_differences(df: pd.DataFrame, diffs: int | Iterable[int], lag: int = 1) -> pd.DataFrame:
     """
     Compute first-order differences of a time series for one or more lag periods,
     and return them in a long-format DataFrame aligned with the input data.
@@ -351,8 +300,113 @@ def make_differences(df: pd.DataFrame, diffs: int | Iterable[int], lag: int = 1)
     feature_list = diff_list + pct_list
 
     # we need to merge with the input dataframe to keep only the dates
-    # that appear on the input dataframe.
+    # that appear on the input dataframe and preserve row order.
     diff_df = pd.concat(feature_list, axis=1).reset_index()
     diff_df_merged = df.merge(diff_df, how='left').loc[:, diff_df.columns]
 
     return diff_df_merged
+
+def make_features(df: pd.DataFrame,
+                  lags: int | Iterable[int],
+                  windows: Iterable[int],
+                  diffs: Iterable[int]) -> pd.DataFrame:
+    """
+    Generate time series forecasting features from a retail sales DataFrame.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input DataFrame containing sales and related metadata per store and date.
+    lags : int or Iterable[int]
+        List (or single value) of lag periods (in days) to compute past sales values.
+        For example, `[1, 7, 30]` creates features for sales 1, 7, and 30 days ago.
+    windows : int or Iterable[int]
+        List (or single value) of rolling window sizes (in days) to compute
+        moving averages and other rolling statistics of past sales.
+    diffs : int or Iterable[int]
+        List (or single value) of differencing periods (in days) for computing
+        first-order change features (e.g., daily or weekly sales deltas).
+
+    Returns
+    -------
+    pd.DataFrame
+        The input DataFrame with additional engineered features, including:
+        
+        **Competition-related features**
+        - `CompetitionDistance`: log-transformed distance to competitor.
+        - `CompetitionSinceMonths`: months since competitor opened.
+        
+        **Promotion-related features**
+        - `Promo2SinceWeeks`: weeks since start of ongoing promo (zero if inactive).
+        
+        **Calendar features**
+        - `is_weekend`: boolean indicator for weekends.
+        - `WeekOfYear`, `Month`, `Year`, `Quarter`: temporal calendar indicators.
+        
+        **Cyclic features**
+        - `Month_sin`, `Month_cos`: encodings for month periodicity.
+        - `DayOfWeek_sin`, `DayOfWeek_cos`: encodings for weekly periodicity.
+        
+        **Lag features**
+        - `Sales_lag_<n>`: sales values lagged by n days.
+        
+        **Rolling features**
+        - `Sales_roll_<n>_<stat>`: rolling window statistics (e.g., mean, std).
+        
+        **Differencing features**
+        - `diff_days_<n>`: first-order sales difference over n days.
+        - `pct_days_<n>`: first-order sales percentage difference over n days.
+
+        Original columns `Promo2SinceDate`, `CompetitionSinceDate`, and `Sales`
+        are dropped from the final DataFrame.
+
+    Notes
+    -----
+    - The function expects date columns to be of dtype `datetime64[ns]`.
+    - All intermediate feature frames are merged on ['Date', 'Store'] using outer joins.
+    """
+
+    sales_df = df[['Date', 'Store', 'Sales']]
+    
+    # Competition-related features
+    df['CompetitionDistance'] = df['CompetitionDistance'].apply(np.log1p)
+    df['CompetitionSinceMonths'] = ( (df['Date'] - df['CompetitionSinceDate']).dt.days / 30.0 ).round()
+
+    # Promotion-related features
+    df['Promo2SinceWeeks'] = (df['Date'] - df['Promo2SinceDate']).dt.days / 7.0
+    df['Promo2SinceWeeks'] = df['Promo2SinceWeeks'].fillna(0).round().astype(int) 
+    df['Promo2SinceWeeks'] = df['Promo2SinceWeeks'] * df['Promo2'] # essentially a boolean mask
+
+    # Calendar and seasonality features
+    df['is_weekend'] = df['Date'].dt.dayofweek >= 5
+
+    # Basic date features
+    df['WeekOfYear'] = df['Date'].dt.isocalendar().week
+    df['Month'] = df['Date'].dt.month
+    df['Year'] = df['Date'].dt.year
+    df['Quarter'] = df['Date'].dt.quarter
+
+    # Cyclical features
+    cyclic_month = _make_cyclic(df['Month'], period=12)
+    cyclic_week = _make_cyclic(df['DayOfWeek'], period=7)
+    cyclic_month.index = pd.MultiIndex.from_frame(df[['Date', 'Store']])
+    cyclic_week.index = pd.MultiIndex.from_frame(df[['Date', 'Store']])
+
+    # Lagged features
+    lag_df = _make_lags(sales_df, lags).set_index(['Date', 'Store'])
+
+    # Rolling window features
+    window_df = _make_rolling(sales_df, windows).set_index(['Date', 'Store'])
+
+    # First-order differencing features
+    diff_df = _make_differences(sales_df, diffs).set_index(['Date', 'Store'])
+
+    # Merge everything
+    feature_list = [cyclic_month, cyclic_week, lag_df, window_df, diff_df]
+    merged = reduce(lambda left, right: pd.merge(left, right, on=["Date", "Store"], how="outer"), feature_list).reset_index()
+    df = df.merge(merged, how='left')
+
+    # Drop useless columns
+    df.drop(['Promo2SinceDate', 'CompetitionSinceDate', 'Sales'], axis=1, inplace=True)
+
+    return df
