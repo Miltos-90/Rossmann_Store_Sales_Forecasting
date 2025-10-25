@@ -108,7 +108,7 @@ def _make_lags(df: pd.DataFrame, lags: int | Iterable[int]) -> pd.DataFrame:
     lag_dfs = []
     for lag in lags:
         lag_offset = DateOffset(days=lag)
-        value_name = "_".join(f"lag_{k}_{v}" for k, v in lag_offset.kwds.items())
+        value_name = "_".join(f"lag_{v}_{k}" for k, v in lag_offset.kwds.items())
 
         lag_df = (df_p.shift(freq=lag_offset)
                 .reset_index()
@@ -152,7 +152,9 @@ def make_targets(df: pd.DataFrame, horizon: int) -> pd.DataFrame:
 
     return lag_df
 
-def _make_rolling(df: pd.DataFrame, windows: int | Iterable[int], lag: int = 1) -> pd.DataFrame:
+def _make_rolling(df: pd.DataFrame,
+                  windows: int | Iterable[int],
+                  lags: int | Iterable[int]) -> pd.DataFrame:
     """
     Compute rolling mean features for one or more window sizes, with an optional lag shift.
 
@@ -166,7 +168,7 @@ def _make_rolling(df: pd.DataFrame, windows: int | Iterable[int], lag: int = 1) 
     windows : int or iterable of int
         Rolling window size(s) in number of observations (e.g., 3, 7, or [3, 7, 14]).
         If a single integer is passed, it is automatically wrapped in a list.
-    lag : int
+    lags : int or iterable of int
         Number of days (or time units) to lag the data before computing rolling
         statistics.
 
@@ -191,31 +193,36 @@ def _make_rolling(df: pd.DataFrame, windows: int | Iterable[int], lag: int = 1) 
     if not isinstance(windows, list):
         windows = [windows]
 
-    df_p = (
-        pd.pivot(df, index=df.columns[0], columns=df.columns[1], values=df.columns[2])
-        .sort_index()  # Sorted from oldest to newest
-        .shift(freq=DateOffset(days=lag))  # single-day-lag
-    )
+    if not isinstance(lags, list):
+        lags = [lags]
+
+    df_p = (pd.pivot(df,
+                    index=df.columns[0],
+                    columns=df.columns[1],
+                    values=df.columns[2])
+            .sort_index())  # Sorted from oldest to newest
+
+    melt = lambda df, name: (df.reset_index()
+                            .melt(id_vars=[df_p.index.name], value_name=name)
+                            .set_index([df_p.index.name, df_p.columns.name]))
 
     feature_dfs = []
-    id_name = df_p.index.name
-    melt_index = [df_p.index.name, df_p.columns.name]
-    melt = lambda df, name: (df.reset_index()
-                            .melt(id_vars=[id_name], value_name=name)
-                            .set_index(melt_index))
-    
-    for w in windows:
-        roll = df_p.rolling(window=w)
+    for lag in lags:
+        df_p_lagged = df_p.shift(freq=DateOffset(days=lag))
 
-        feature_list = pd.concat([
-            melt(roll.mean(), name=f"roll_mean_days_{w}"),
-            melt(roll.std(), name=f"roll_std_days_{w}"),
-            melt(roll.skew(), name=f"roll_skew_days_{w}"),
-            melt(roll.kurt(), name=f"roll_kurt_days_{w}"),
-            melt(roll.max(), name=f"roll_max_days_{w}")
-        ], axis=1)
-        
-        feature_dfs.append(feature_list)
+        for w in windows:
+            roll = df_p_lagged.rolling(window=w)
+            feature_list = pd.concat([
+                melt(roll.mean(), name=f"lag_{lag}_roll_{w}_days_mean"),
+                melt(roll.std(), name=f"lag_{lag}_roll_{w}_days_std"),
+                melt(roll.skew(), name=f"lag_{lag}_roll_{w}_days_skew"),
+                melt(roll.kurt(), name=f"lag_{lag}_roll_{w}_days_kurt"),
+                melt(roll.quantile(0.5), name=f"lag_{lag}_roll_{w}_days_median"),
+                melt(roll.quantile(0.1), name=f"lag_{lag}_roll_{w}_days_10percentile"),
+                melt(roll.quantile(0.9), name=f"lag_{lag}_roll_{w}_days_90percentile")
+            ], axis=1)
+
+            feature_dfs.append(feature_list)
 
     # we need to merge with the input dataframe to keep only the dates
     # that appear on the input dataframe and preserve row order.
@@ -252,7 +259,8 @@ def _make_cyclic(s: pd.Series, period: int) -> pd.DataFrame:
 
     return cyclic_df
 
-def _make_differences(df: pd.DataFrame, diffs: int | Iterable[int], lag: int = 1) -> pd.DataFrame:
+def _make_differences(df: pd.DataFrame,
+                      diffs: int | Iterable[int]) -> pd.DataFrame:
     """
     Compute first-order differences of a time series for one or more lag periods,
     and return them in a long-format DataFrame aligned with the input data.
@@ -266,9 +274,6 @@ def _make_differences(df: pd.DataFrame, diffs: int | Iterable[int], lag: int = 1
         One or more integer values indicating the number of days over which
         to compute first-order differences (e.g., `[1, 7, 30]` for daily,
         weekly, and monthly changes).
-    lag : int, default=1
-        Number of days to shift the entire time series before differencing.
-        Useful to ensure the differences are computed relative to the desired lag.
 
     Returns
     -------
@@ -277,39 +282,42 @@ def _make_differences(df: pd.DataFrame, diffs: int | Iterable[int], lag: int = 1
         difference feature columns named as:
         - `"diff_days_<d>"` for each value of `d` in `diffs`.
         - `"pct_days_<d>"` for each value of `d` in `diffs`.
-
     """
 
     if not isinstance(diffs, list):
         diffs = [diffs]
 
-    df_pivot = (
+    df_p = (
         pd.pivot(df, index=df.columns[0], columns=df.columns[1], values=df.columns[2])
         .sort_index()  # Sorted from oldest to newest
-        .shift(freq=DateOffset(days=lag))  # single-day-lag
+        .shift(freq=DateOffset(days=1))  # single-day-lag. We compute differences of the lagged value
         )
 
-    id_name = df_pivot.index.name
-    melt_index = [df_pivot.index.name, df_pivot.columns.name]
+    id_name = df_p.index.name
+    melt_index = [df_p.index.name, df_p.columns.name]
     melt = lambda df, name: (df.reset_index()
                              .melt(id_vars=[id_name], value_name=name)
                              .set_index(melt_index))
 
-    diff_list = [melt(df_pivot.diff(d), name=f"diff_days_{d}") for d in diffs]
-    pct_list = [melt(df_pivot.pct_change(d, fill_method=None), name=f"pct_days_{d}") for d in diffs]
+    diff_list = [melt(df_p.diff(d), name=f"lag_1_{d}_days_diff")
+                 for d in diffs]
+    pct_list = [melt(df_p.pct_change(d, fill_method=None), name=f"lag_1_{d}_days_pct_change")
+                for d in diffs]
     feature_list = diff_list + pct_list
 
     # we need to merge with the input dataframe to keep only the dates
     # that appear on the input dataframe and preserve row order.
-    diff_df = pd.concat(feature_list, axis=1).reset_index()
-    diff_df_merged = df.merge(diff_df, how='left').loc[:, diff_df.columns]
+    feature_df = pd.concat(feature_list, axis=1).reset_index()
+    feature_df = df.merge(feature_df, how='left').loc[:, feature_df.columns]
 
-    return diff_df_merged
+    return feature_df
+
+from typing import Dict
 
 def make_features(df: pd.DataFrame,
                   lags: int | Iterable[int],
-                  windows: Iterable[int],
-                  diffs: Iterable[int]) -> pd.DataFrame:
+                  roll_windows: Dict[int, int | Iterable[int]],
+                  diffs: int | Iterable[int]) -> pd.DataFrame:
     """
     Generate time series forecasting features from a retail sales DataFrame.
 
@@ -320,10 +328,10 @@ def make_features(df: pd.DataFrame,
     lags : int or Iterable[int]
         List (or single value) of lag periods (in days) to compute past sales values.
         For example, `[1, 7, 30]` creates features for sales 1, 7, and 30 days ago.
-    windows : int or Iterable[int]
-        List (or single value) of rolling window sizes (in days) to compute
+    roll_windows : Dict of int and int or Iterable[int]
+        Dictionary of rolling window sizes (in days) adn corresponding lags (in days) to compute
         moving averages and other rolling statistics of past sales.
-    diffs : int or Iterable[int]
+    diffs : Dict of int and int or Iterable[int]
         List (or single value) of differencing periods (in days) for computing
         first-order change features (e.g., daily or weekly sales deltas).
 
@@ -331,39 +339,6 @@ def make_features(df: pd.DataFrame,
     -------
     pd.DataFrame
         The input DataFrame with additional engineered features, including:
-        
-        **Competition-related features**
-        - `CompetitionDistance`: log-transformed distance to competitor.
-        - `CompetitionSinceMonths`: months since competitor opened.
-        
-        **Promotion-related features**
-        - `Promo2SinceWeeks`: weeks since start of ongoing promo (zero if inactive).
-        
-        **Calendar features**
-        - `is_weekend`: boolean indicator for weekends.
-        - `WeekOfYear`, `Month`, `Year`, `Quarter`: temporal calendar indicators.
-        
-        **Cyclic features**
-        - `Month_sin`, `Month_cos`: encodings for month periodicity.
-        - `DayOfWeek_sin`, `DayOfWeek_cos`: encodings for weekly periodicity.
-        
-        **Lag features**
-        - `Sales_lag_<n>`: sales values lagged by n days.
-        
-        **Rolling features**
-        - `Sales_roll_<n>_<stat>`: rolling window statistics (e.g., mean, std).
-        
-        **Differencing features**
-        - `diff_days_<n>`: first-order sales difference over n days.
-        - `pct_days_<n>`: first-order sales percentage difference over n days.
-
-        Original columns `Promo2SinceDate`, `CompetitionSinceDate`, and `Sales`
-        are dropped from the final DataFrame.
-
-    Notes
-    -----
-    - The function expects date columns to be of dtype `datetime64[ns]`.
-    - All intermediate feature frames are merged on ['Date', 'Store'] using outer joins.
     """
 
     sales_df = df[['Date', 'Store', 'Sales']]
@@ -396,13 +371,16 @@ def make_features(df: pd.DataFrame,
     lag_df = _make_lags(sales_df, lags).set_index(['Date', 'Store'])
 
     # Rolling window features
-    window_df = _make_rolling(sales_df, windows).set_index(['Date', 'Store'])
+    window_dfs = []
+    for window, lags in roll_windows.items():
+        window_df = _make_rolling(sales_df, window, lags).set_index(['Date', 'Store'])
+        window_dfs.append(window_df)
 
     # First-order differencing features
     diff_df = _make_differences(sales_df, diffs).set_index(['Date', 'Store'])
 
     # Merge everything
-    feature_list = [cyclic_month, cyclic_week, lag_df, window_df, diff_df]
+    feature_list = [cyclic_month, cyclic_week, lag_df, diff_df] + window_dfs
     merged = reduce(lambda left, right: pd.merge(left, right, on=["Date", "Store"], how="outer"), feature_list).reset_index()
     df = df.merge(merged, how='left')
 
