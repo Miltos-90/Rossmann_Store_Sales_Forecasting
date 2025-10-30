@@ -72,13 +72,7 @@ def _resetting_cumsum(s: pd.Series) -> pd.Series:
 
 def _promo_counter(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Compute consecutive promotion day counts for each store or entity.
-
-    This function reshapes a long-format DataFrame of promotion flags into a wide
-    format (using `pivot`), where rows represent dates and columns represent stores
-    or entities. It forward-fills missing values, replaces any remaining missing entries
-    with zeros, and then computes the length of consecutive promotion periods by
-    applying `_resetting_cumsum()` to each column.
+    Compute consecutive promotion days for each store or entity.
 
     Parameters
     ----------
@@ -149,6 +143,66 @@ def attach_store_data(df: pd.DataFrame, stores: pd.DataFrame) -> pd.DataFrame:
     df.drop('PromoInterval', axis=1, inplace=True)
 
     return df
+
+def _make_holiday_counters(df: pd.DataFrame, offsets: int | Iterable[int]) -> pd.DataFrame:
+    """
+    Generate shifted holiday count features based on weekly holiday frequency.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Long-format DataFrame with at least three columns:
+        1. A date column (used as the time index),
+        2. An entity identifier column (e.g., store ID),
+        3. A holiday flag column (e.g., `1` or `'0'`).
+        The DataFrame should be sorted chronologically.
+    offsets : int or Iterable[int]
+        One or more day offsets for which to create shifted holiday counters.
+        Positive offsets look backward (lags), negative offsets look forward (leads).
+
+    Returns
+    -------
+    pd.DataFrame
+        A long-format DataFrame containing one or more new columns of shifted
+        holiday counters. Each column represents the number of holidays per week,
+        shifted by the corresponding number of days.
+        Column names follow the pattern:
+        ```
+        num_<holiday_colname>_day_lag_<offset>
+        ```
+    """
+
+    if isinstance(offsets, int):
+        offsets = [offsets]
+
+    holiday_colname = df.columns[2]
+    df_p = (pd.pivot(df, index=df.columns[0], columns=df.columns[1], values=holiday_colname)
+            .sort_index())  # Sorted from oldest to newest
+
+    id_name = df_p.index.name
+    melt_index = [df_p.index.name, df_p.columns.name]
+    melt = lambda df, name: (df.reset_index()
+                                .melt(id_vars=[id_name], value_name=name)
+                                .set_index(melt_index))
+
+    # Count number of holidays per week
+    isodates = df_p.index.isocalendar()
+    week_year = isodates.year.astype(str) + isodates.week.astype(str).str.zfill(2)
+    num_holidays_per_week = (df_p
+                            .groupby(week_year)
+                            .transform(lambda group: (group != '0').sum(axis=0)))
+
+    # Shift the counters for every offset and make a new df
+    holiday_counters = []
+    for day_offset in offsets:
+        holiday_df = num_holidays_per_week.shift(freq=pd.DateOffset(days=day_offset))
+        holiday_df_melt = melt(holiday_df, name = f'num_{holiday_colname}_day_lag_{day_offset}')
+        holiday_counters.append(holiday_df_melt)
+
+
+    holiday_counters = pd.concat(holiday_counters, axis=1).fillna(0).astype(int)
+
+    return holiday_counters
 
 def _make_lags(df: pd.DataFrame, lags: int | Iterable[int]) -> pd.DataFrame:
     """
@@ -398,7 +452,9 @@ from typing import Dict
 def make_features(df: pd.DataFrame,
                   lags: int | Iterable[int],
                   roll_windows: Dict[int, int | Iterable[int]],
-                  diffs: int | Iterable[int]) -> pd.DataFrame:
+                  diffs: int | Iterable[int],
+                  holiday_windows: int | Iterable[int]
+                  ) -> pd.DataFrame:
     """
     Generate time series forecasting features from a retail sales DataFrame.
 
@@ -410,11 +466,14 @@ def make_features(df: pd.DataFrame,
         List (or single value) of lag periods (in days) to compute past sales values.
         For example, `[1, 7, 30]` creates features for sales 1, 7, and 30 days ago.
     roll_windows : Dict of int and int or Iterable[int]
-        Dictionary of rolling window sizes (in days) adn corresponding lags (in days) to compute
+        Dictionary of rolling window sizes (in days) and corresponding lags (in days) to compute
         moving averages and other rolling statistics of past sales.
-    diffs : Dict of int and int or Iterable[int]
+    diffs : int or Iterable[int]
         List (or single value) of differencing periods (in days) for computing
         first-order change features (e.g., daily or weekly sales deltas).
+    holiday_windows : int or Iterable[int]
+        One or more day offsets for which to create shifted holiday counters.
+        Positive offsets look backward (lags), negative offsets look forward (leads).
 
     Returns
     -------
@@ -459,9 +518,18 @@ def make_features(df: pd.DataFrame,
     # First-order differencing features
     diff_df = _make_differences(sales_df, diffs).set_index(['Date', 'Store'])
 
+    # Holiday counters
+    state_holiday_counters = _make_holiday_counters(df[['Date', 'Store', 'StateHoliday']], holiday_windows)
+    school_holiday_counters = _make_holiday_counters(df[['Date', 'Store', 'SchoolHoliday']], holiday_windows)
+
     # Merge everything
-    feature_list = [cyclic_month, cyclic_week, lag_df, diff_df, promo_counter, promo2_counter] + window_dfs
-    merged = reduce(lambda left, right: pd.merge(left, right, on=["Date", "Store"], how="outer"), feature_list).reset_index()
+    feature_list = [cyclic_month, cyclic_week, lag_df,
+                    diff_df, promo_counter, promo2_counter,
+                    state_holiday_counters, school_holiday_counters
+                    ] + window_dfs
+    merged = reduce(
+        lambda left, right: pd.merge(left, right, on=["Date", "Store"], how="outer"), feature_list
+        ).reset_index()
     df = df.merge(merged, how='left')
 
     # Drop useless columns

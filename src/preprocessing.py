@@ -69,5 +69,5 @@ def process_store_data(df: pd.DataFrame) -> pd.DataFrame:
 
     date_outliers = df['CompetitionSinceDate'] < '1960-01-01'  # Outlier: 1900-01-01
     df.loc[date_outliers, 'CompetitionSinceDate'] = pd.NaT
-    
+
     return df
