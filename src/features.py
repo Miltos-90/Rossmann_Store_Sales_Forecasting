@@ -3,8 +3,8 @@
 import pandas as pd
 import numpy as np
 
-from typing import Iterable
 from functools import reduce
+from typing import Iterable, Dict
 from pandas.tseries.offsets import DateOffset
 
 def _in_promo2(row, date_col: str, interval_col: str, start_promo_date_col: str):
@@ -447,13 +447,100 @@ def _make_differences(df: pd.DataFrame,
 
     return feature_df
 
-from typing import Dict
+def _slope(df: pd.DataFrame) -> pd.Series:
+    """
+    Computes the linear trend (slope) for each column in a rolling window.
+
+    Parameters
+    ----------
+    rolled : pd.DataFrame
+        A windowed subset of the original DataFrame, as passed by rolling.apply().
+
+    Returns
+    -------
+    pd.Series
+        A Series of slope values, one per column.
+    """
+    if len(df) < 2:
+        # Not enough data to compute slope
+        return pd.Series(np.nan, index=df.columns)
+
+    # Create numeric time vector for regression (0, 1, ..., n-1)
+    X = np.arange(len(df))
+    X_mean = X.mean()
+    den = np.sum((X - X_mean) ** 2)
+
+    # Vectorized slope computation: cov(X, Y) / var(X)
+    slopes = ( (df - df.mean()).mul(X - X_mean, axis=0).sum(axis=0) ) / den
+
+    return slopes
+
+def _make_trend(df: pd.DataFrame, trend_window: int, trend_step: int) -> pd.DataFrame:
+    """
+    Compute linear trend (slope) over rolling windows for a pivoted time–series panel,
+    and return the result in a long/melted format.
+
+    This function expects `df` to contain exactly three columns that can be pivoted into
+    a 2D matrix: the first column becomes the index (typically a time or sequence key),
+    the second column becomes the column labels (e.g., series identifiers), and the third
+    column holds numeric values. After pivoting and sorting by index (oldest → newest),
+    it computes rolling-window slopes via `_slope` and returns the panel in a tidy
+    long-form DataFrame with a single value column named ``'linear_trend'``.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        A DataFrame with **three columns**:
+        - `df.columns[0]`: index key (e.g., timestamp, period, or monotonic integer).
+        - `df.columns[1]`: column key (e.g., series/category identifier).
+        - `df.columns[2]`: numeric values to analyze.
+        The data will be pivoted as `pivot(index=df.columns[0], columns=df.columns[1], values=df.columns[2])`
+        and sorted by the index ascending before computing trends.
+    trend_window : int
+        Window size (in number of rows of the pivoted panel) used for the rolling trend
+        computation. Must be >= 1.
+    trend_step : int
+        Step (stride) between rolling window positions. Also serves as `min_periods`,
+        meaning slope is computed only when there are at least `trend_step` observations
+        available within the current window. Must be >= 1.
+
+    Returns
+    -------
+    pandas.DataFrame
+        A melted/tidy DataFrame with a MultiIndex of:
+        - level 0: the original pivot index name (from `df.columns[0]`),
+        - level 1: the original column labels (from `df.columns[1]`),
+        and a single value column:
+        - `'linear_trend'`: the slope computed by `_slope` over each rolling window.
+        Rows where insufficient data were available (i.e., fewer than `trend_step` points)
+        will contain NaN in `'linear_trend'`.
+    """
+
+    df_p = (pd.pivot(df,
+                     index=df.columns[0],
+                     columns=df.columns[1],
+                     values=df.columns[2]).sort_index())  # Sorted from oldest to newest
+
+    id_name = df_p.index.name
+    melt_index = [df_p.index.name, df_p.columns.name]
+    melt = lambda df, name: (df.reset_index()
+                                .melt(id_vars=[id_name], value_name=name)
+                                .set_index(melt_index))
+
+    slopes = (df_p
+              .rolling(window=trend_window, min_periods=trend_step, step=trend_step)
+              .apply(_slope))
+    
+    df_out = melt(slopes, name = f'linear_trend')
+
+    return df_out
 
 def make_features(df: pd.DataFrame,
                   lags: int | Iterable[int],
                   roll_windows: Dict[int, int | Iterable[int]],
                   diffs: int | Iterable[int],
-                  holiday_windows: int | Iterable[int]
+                  holiday_windows: int | Iterable[int],
+                  trends: Iterable[int]
                   ) -> pd.DataFrame:
     """
     Generate time series forecasting features from a retail sales DataFrame.
@@ -474,6 +561,9 @@ def make_features(df: pd.DataFrame,
     holiday_windows : int or Iterable[int]
         One or more day offsets for which to create shifted holiday counters.
         Positive offsets look backward (lags), negative offsets look forward (leads).
+    trends : int or Iterable[int]
+        Tuple of window sizes and step intervals to use for the calculation of sales trends
+        of each store.
 
     Returns
     -------
@@ -522,11 +612,15 @@ def make_features(df: pd.DataFrame,
     state_holiday_counters = _make_holiday_counters(df[['Date', 'Store', 'StateHoliday']], holiday_windows)
     school_holiday_counters = _make_holiday_counters(df[['Date', 'Store', 'SchoolHoliday']], holiday_windows)
 
+    # Linear trends (slopes)
+    linear_trends = _make_trend(sales_df, trends[0], trends[1])
+
     # Merge everything
-    feature_list = [cyclic_month, cyclic_week, lag_df,
+    feature_list = [cyclic_month, cyclic_week, lag_df, linear_trends,
                     diff_df, promo_counter, promo2_counter,
                     state_holiday_counters, school_holiday_counters
                     ] + window_dfs
+
     merged = reduce(
         lambda left, right: pd.merge(left, right, on=["Date", "Store"], how="outer"), feature_list
         ).reset_index()
