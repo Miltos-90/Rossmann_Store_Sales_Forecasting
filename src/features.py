@@ -3,7 +3,7 @@
 import pandas as pd
 import numpy as np
 
-from typing import Iterable
+from typing import Iterable, Dict
 from functools import reduce
 from pandas.tseries.offsets import DateOffset
 
@@ -69,6 +69,85 @@ def attach_store_data(df: pd.DataFrame, stores: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
+
+def _to_list(x):
+    """
+    Normalize input to a list.
+
+    Parameters
+    ----------
+    x : int or Iterable
+        Input value or iterable.
+
+    Returns
+    -------
+    list
+        List containing the input(s).
+    """
+    return [x] if isinstance(x, (int, DateOffset)) else list(x)
+
+
+def _pivot(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Pivot a long-format DataFrame to wide format, sorted by index.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input DataFrame with at least three columns.
+
+    Returns
+    -------
+    pd.DataFrame
+        Pivoted and sorted DataFrame.
+    """
+    return (pd.pivot(df, index=df.columns[0], columns=df.columns[1], values=df.columns[2])
+            .sort_index())
+
+
+def _melt(df_wide: pd.DataFrame, name: str) -> pd.DataFrame:
+    """
+    Melt a wide-format DataFrame back to long format with a specific value column name.
+
+    Parameters
+    ----------
+    df_wide : pd.DataFrame
+        Wide-format DataFrame (pivoted).
+    name : str
+        Name for the value column.
+
+    Returns
+    -------
+    pd.DataFrame
+        Melted DataFrame with MultiIndex.
+    """
+    index_name = df_wide.index.name
+    columns_name = df_wide.columns.name
+    return (df_wide.reset_index()
+            .melt(id_vars=[index_name], value_name=name)
+            .set_index([index_name, columns_name]))
+
+
+def _align(df: pd.DataFrame, feature_dfs: list) -> pd.DataFrame:
+    """
+    Merge feature DataFrames with the original DataFrame, preserving row order and columns.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Original long-format DataFrame.
+    feature_dfs : list of pd.DataFrame
+        List of feature DataFrames to merge.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with features aligned to the original rows.
+    """
+    feature_df = pd.concat(feature_dfs, axis=1).reset_index()
+    return df.merge(feature_df, how='left').loc[:, feature_df.columns]
+
+
 def _make_lags(df: pd.DataFrame, lags: int | Iterable[int]) -> pd.DataFrame:
     """
     Generate and merge multiple lagged feature DataFrames based on one or more DateOffset objects.
@@ -95,34 +174,18 @@ def _make_lags(df: pd.DataFrame, lags: int | Iterable[int]) -> pd.DataFrame:
     - The input DataFrame must be sorted in ascending time order.
     """
 
-    if isinstance(lags, int):
-        lags = [lags]
-
-    df_p = (
-        pd.pivot(df, index=df.columns[0], columns=df.columns[1], values=df.columns[2])
-        .sort_index() # Sorted from oldest to newest
-    )
-
-    id_name = df_p.index.name
-    melt_index = [df_p.index.name, df_p.columns.name]
+    lags = _to_list(lags)
+    df_p = _pivot(df)
     lag_dfs = []
     for lag in lags:
-        lag_offset = DateOffset(days=lag)
-        value_name = "_".join(f"lag_{v}_{k}" for k, v in lag_offset.kwds.items())
+        offset = lag if isinstance(lag, DateOffset) else DateOffset(days=lag)
+        name = "_".join(f"lag_{v}_{k}" for k, v in offset.kwds.items())
+        prior_index = df_p.index - offset
+        df_p_lagged = df_p.reindex(prior_index)
+        df_p_lagged.index = df_p.index
+        lag_dfs.append(_melt(df_p_lagged, name))
 
-        lag_df = (df_p.shift(freq=lag_offset)
-                .reset_index()
-                .melt(id_vars=[id_name], value_name=value_name)
-                .set_index(melt_index))
-
-        lag_dfs.append(lag_df)
-
-    # we need to merge with the input dataframe to keep only the dates
-    # that appear on the input dataframe and preserve row order.
-    lag_df = pd.concat(lag_dfs, axis=1).reset_index()
-    lag_df = df.merge(lag_df, how='left').loc[:, lag_df.columns]
-
-    return lag_df
+    return _align(df, lag_dfs)
 
 def make_targets(df: pd.DataFrame, horizon: int) -> pd.DataFrame:
     """
@@ -190,46 +253,30 @@ def _make_rolling(df: pd.DataFrame,
       of days.
     """
 
-    if not isinstance(windows, list):
-        windows = [windows]
-
-    if not isinstance(lags, list):
-        lags = [lags]
-
-    df_p = (pd.pivot(df,
-                    index=df.columns[0],
-                    columns=df.columns[1],
-                    values=df.columns[2])
-            .sort_index())  # Sorted from oldest to newest
-
-    melt = lambda df, name: (df.reset_index()
-                            .melt(id_vars=[df_p.index.name], value_name=name)
-                            .set_index([df_p.index.name, df_p.columns.name]))
-
+    windows = _to_list(windows)
+    lags = _to_list(lags)
+    df_p = _pivot(df)
     feature_dfs = []
     for lag in lags:
-        df_p_lagged = df_p.shift(freq=DateOffset(days=lag))
-
+        offset = lag if isinstance(lag, DateOffset) else DateOffset(days=lag)
+        lag_name = "_".join(f"{v}_{k}" for k, v in offset.kwds.items())
+        prior_index = df_p.index - offset
+        df_p_lagged = df_p.reindex(prior_index)
+        df_p_lagged.index = df_p.index
         for w in windows:
             roll = df_p_lagged.rolling(window=w)
-            feature_list = pd.concat([
-                melt(roll.mean(), name=f"lag_{lag}_roll_{w}_days_mean"),
-                melt(roll.std(), name=f"lag_{lag}_roll_{w}_days_std"),
-                melt(roll.skew(), name=f"lag_{lag}_roll_{w}_days_skew"),
-                melt(roll.kurt(), name=f"lag_{lag}_roll_{w}_days_kurt"),
-                melt(roll.quantile(0.5), name=f"lag_{lag}_roll_{w}_days_median"),
-                melt(roll.quantile(0.1), name=f"lag_{lag}_roll_{w}_days_10percentile"),
-                melt(roll.quantile(0.9), name=f"lag_{lag}_roll_{w}_days_90percentile")
-            ], axis=1)
+            feature_dfs.extend([
+                _melt(roll.mean(),         f"lag_{lag_name}_roll_{w}_days_mean"),
+                _melt(roll.std(),          f"lag_{lag_name}_roll_{w}_days_std"),
+                _melt(roll.skew(),         f"lag_{lag_name}_roll_{w}_days_skew"),
+                _melt(roll.kurt(),         f"lag_{lag_name}_roll_{w}_days_kurt"),
+                _melt(roll.quantile(0.5),  f"lag_{lag_name}_roll_{w}_days_median"),
+                _melt(roll.quantile(0.1),  f"lag_{lag_name}_roll_{w}_days_10percentile"),
+                _melt(roll.quantile(0.9),  f"lag_{lag_name}_roll_{w}_days_90percentile"),
+            ])
 
-            feature_dfs.append(feature_list)
+    return _align(df, feature_dfs)
 
-    # we need to merge with the input dataframe to keep only the dates
-    # that appear on the input dataframe and preserve row order.
-    feature_df = pd.concat(feature_dfs, axis=1).reset_index()
-    feature_df = df.merge(feature_df, how='left').loc[:, feature_df.columns]
-
-    return feature_df
 
 def _make_cyclic(s: pd.Series, period: int) -> pd.DataFrame:
     """
@@ -284,35 +331,19 @@ def _make_differences(df: pd.DataFrame,
         - `"pct_days_<d>"` for each value of `d` in `diffs`.
     """
 
-    if not isinstance(diffs, list):
-        diffs = [diffs]
+    diffs = _to_list(diffs)
+    df_p = _pivot(df).shift(freq=DateOffset(days=1))  # 1-day lag to prevent data leakage
+    feature_dfs = []
+    for d in diffs:
+        offset = d if isinstance(d, DateOffset) else DateOffset(days=d)
+        d_name = "_".join(f"{v}_{k}" for k, v in offset.kwds.items())
+        prior_index = df_p.index - offset
+        df_p_prior = df_p.reindex(prior_index)
+        df_p_prior.index = df_p.index
+        feature_dfs.append(_melt(df_p - df_p_prior,                   f"lag_1_{d_name}_diff"))
+        feature_dfs.append(_melt((df_p - df_p_prior).div(df_p_prior), f"lag_1_{d_name}_pct_change"))
 
-    df_p = (
-        pd.pivot(df, index=df.columns[0], columns=df.columns[1], values=df.columns[2])
-        .sort_index()  # Sorted from oldest to newest
-        .shift(freq=DateOffset(days=1))  # single-day-lag. We compute differences of the lagged value
-        )
-
-    id_name = df_p.index.name
-    melt_index = [df_p.index.name, df_p.columns.name]
-    melt = lambda df, name: (df.reset_index()
-                             .melt(id_vars=[id_name], value_name=name)
-                             .set_index(melt_index))
-
-    diff_list = [melt(df_p.diff(d), name=f"lag_1_{d}_days_diff")
-                 for d in diffs]
-    pct_list = [melt(df_p.pct_change(d, fill_method=None), name=f"lag_1_{d}_days_pct_change")
-                for d in diffs]
-    feature_list = diff_list + pct_list
-
-    # we need to merge with the input dataframe to keep only the dates
-    # that appear on the input dataframe and preserve row order.
-    feature_df = pd.concat(feature_list, axis=1).reset_index()
-    feature_df = df.merge(feature_df, how='left').loc[:, feature_df.columns]
-
-    return feature_df
-
-from typing import Dict
+    return _align(df, feature_dfs)
 
 def make_features(df: pd.DataFrame,
                   lags: int | Iterable[int],
