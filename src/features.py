@@ -5,6 +5,7 @@ import numpy as np
 
 from typing import Iterable, Dict
 from functools import reduce
+from typing import Iterable, Dict
 from pandas.tseries.offsets import DateOffset
 
 def _in_promo2(row, date_col: str, interval_col: str, start_promo_date_col: str):
@@ -37,6 +38,81 @@ def _in_promo2(row, date_col: str, interval_col: str, start_promo_date_col: str)
         out = (row[date_col] >= row[start_promo_date_col]) & (month in row[interval_col])
 
     return out
+
+def _resetting_cumsum(s: pd.Series) -> pd.Series:
+    """
+    Compute a cumulative sum that resets after each zero in a binary Series.
+
+    This function takes a binary Series (containing 0s and 1s) and returns a Series
+    where consecutive 1s are cumulatively counted, resetting to 0 whenever a 0 is encountered.
+    It effectively counts the current "run length" of consecutive 1s.
+
+    Parameters
+    ----------
+    s : pd.Series
+        A binary Series of 0s and 1s. Typically used to represent an event flag
+        (e.g., active promotions, open days, or consecutive observations).
+
+    Returns
+    -------
+    pd.Series
+        A Series of the same shape as `s`, where each value represents the number of
+        consecutive 1s since the last 0. Zeros remain zeros.
+    """
+    # Cumulatively counts 1s, producing a group id that increments each time a 0 appears.
+    s_eq_zero_cum = s.eq(0).cumsum()
+
+    # Group the original Series into segments between zeros using the cumulative-zero count as keys,
+    # and compute a running sum within each group, counting consecutive 1s since the last 0.
+    s_cumsum = s.groupby(s_eq_zero_cum).cumsum()
+
+    # Multiply by the original binary Series to force zeros to stay 0 (so only 1-runs are counted).
+    s_out = s_cumsum * s
+
+    return s_out
+
+def _promo_counter(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Compute consecutive promotion days for each store or entity.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Long-format DataFrame with three columns:
+        1. Date or time index (sorted from oldest to newest),
+        2. Entity identifier (e.g., store ID),
+        3. Binary promotion flag (1 if active promotion, 0 otherwise).
+
+    Returns
+    -------
+    pd.DataFrame
+        A wide-format DataFrame where each column corresponds to an entity (e.g., store),
+        and each cell contains the count of consecutive days with an active promotion
+        up to that date. Zeros indicate no active promotion.
+
+    Notes
+    -----
+    - Missing values in the promotion flag are forward-filled, assuming continuity of the last state.
+    - Remaining missing values (e.g., leading NAs) are replaced with zeros.
+    - The `_resetting_cumsum()` helper is applied column-wise to compute consecutive active days.
+    - The index (typically dates) is sorted in ascending order before processing.
+    """
+
+    counter_df =  (
+        pd.pivot(df, index=df.columns[0], columns=df.columns[1], values=df.columns[2])
+        .sort_index()  # Sorted from oldest to newest
+        .ffill() # pad last valid value forward
+        .fillna(0) # backfill with zeros
+        .astype(int)
+        .apply(_resetting_cumsum))
+
+    counter_df_melt = (counter_df
+                       .reset_index()
+                       .melt(id_vars=[counter_df.index.name], value_name=f'{df.columns[2]}_counter')
+                       .set_index([counter_df.index.name, counter_df.columns.name]))
+
+    
+    return counter_df_melt
 
 def attach_store_data(df: pd.DataFrame, stores: pd.DataFrame) -> pd.DataFrame:
     """
@@ -348,7 +424,10 @@ def _make_differences(df: pd.DataFrame,
 def make_features(df: pd.DataFrame,
                   lags: int | Iterable[int],
                   roll_windows: Dict[int, int | Iterable[int]],
-                  diffs: int | Iterable[int]) -> pd.DataFrame:
+                  diffs: int | Iterable[int],
+                  holiday_windows: int | Iterable[int],
+                  trends: Iterable[int]
+                  ) -> pd.DataFrame:
     """
     Generate time series forecasting features from a retail sales DataFrame.
 
@@ -360,11 +439,17 @@ def make_features(df: pd.DataFrame,
         List (or single value) of lag periods (in days) to compute past sales values.
         For example, `[1, 7, 30]` creates features for sales 1, 7, and 30 days ago.
     roll_windows : Dict of int and int or Iterable[int]
-        Dictionary of rolling window sizes (in days) adn corresponding lags (in days) to compute
+        Dictionary of rolling window sizes (in days) and corresponding lags (in days) to compute
         moving averages and other rolling statistics of past sales.
-    diffs : Dict of int and int or Iterable[int]
+    diffs : int or Iterable[int]
         List (or single value) of differencing periods (in days) for computing
         first-order change features (e.g., daily or weekly sales deltas).
+    holiday_windows : int or Iterable[int]
+        One or more day offsets for which to create shifted holiday counters.
+        Positive offsets look backward (lags), negative offsets look forward (leads).
+    trends : int or Iterable[int]
+        Tuple of window sizes and step intervals to use for the calculation of sales trends
+        of each store.
 
     Returns
     -------
@@ -379,9 +464,8 @@ def make_features(df: pd.DataFrame,
     df['CompetitionSinceMonths'] = ( (df['Date'] - df['CompetitionSinceDate']).dt.days / 30.0 ).round()
 
     # Promotion-related features
-    df['Promo2SinceWeeks'] = (df['Date'] - df['Promo2SinceDate']).dt.days / 7.0
-    df['Promo2SinceWeeks'] = df['Promo2SinceWeeks'].fillna(0).round().astype(int) 
-    df['Promo2SinceWeeks'] = df['Promo2SinceWeeks'] * df['Promo2'] # essentially a boolean mask
+    promo_counter = _promo_counter(df[['Date', 'Store', 'Promo']])
+    promo2_counter = _promo_counter(df[['Date', 'Store', 'Promo2']])
 
     # Calendar and seasonality features
     df['is_weekend'] = df['Date'].dt.dayofweek >= 5
@@ -410,9 +494,22 @@ def make_features(df: pd.DataFrame,
     # First-order differencing features
     diff_df = _make_differences(sales_df, diffs).set_index(['Date', 'Store'])
 
+    # Holiday counters
+    state_holiday_counters = _make_holiday_counters(df[['Date', 'Store', 'StateHoliday']], holiday_windows)
+    school_holiday_counters = _make_holiday_counters(df[['Date', 'Store', 'SchoolHoliday']], holiday_windows)
+
+    # Linear trends (slopes)
+    linear_trends = _make_trend(sales_df, trends[0], trends[1])
+
     # Merge everything
-    feature_list = [cyclic_month, cyclic_week, lag_df, diff_df] + window_dfs
-    merged = reduce(lambda left, right: pd.merge(left, right, on=["Date", "Store"], how="outer"), feature_list).reset_index()
+    feature_list = [cyclic_month, cyclic_week, lag_df, linear_trends,
+                    diff_df, promo_counter, promo2_counter,
+                    state_holiday_counters, school_holiday_counters
+                    ] + window_dfs
+
+    merged = reduce(
+        lambda left, right: pd.merge(left, right, on=["Date", "Store"], how="outer"), feature_list
+        ).reset_index()
     df = df.merge(merged, how='left')
 
     # Drop useless columns
