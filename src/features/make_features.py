@@ -1,0 +1,124 @@
+""" Main feature-engineering entry point: make_features. """
+
+import pandas as pd
+import numpy as np
+
+from typing import Iterable, Dict
+from functools import reduce
+from pandas.tseries.offsets import DateOffset
+
+from .utils import _to_list
+from .lags import _make_lags
+from .rolling import _make_rolling
+from .differences import _make_differences
+from .cyclic import _make_cyclic
+from .holidays import _make_holiday_proximity
+from .promo import _make_consecutive_promo
+from .target_encoding import _target_encode
+
+
+def make_features(df: pd.DataFrame,
+                  lags: int | Iterable[int],
+                  roll_windows: Dict[int, int | Iterable[int]],
+                  diffs: int | Iterable[int]) -> pd.DataFrame:
+    """
+    Generate time series forecasting features from a retail sales DataFrame.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input DataFrame containing sales and related metadata per store and date.
+    lags : int or Iterable[int]
+        List (or single value) of lag periods (in days) to compute past sales values.
+        For example, `[1, 7, 30]` creates features for sales 1, 7, and 30 days ago.
+    roll_windows : Dict of int and int or Iterable[int]
+        Dictionary of rolling window sizes (in days) and corresponding lags (in days) to compute
+        moving averages and other rolling statistics of past sales.
+    diffs : int or Iterable[int]
+        List (or single value) of differencing periods (in days) for computing
+        first-order change features (e.g., daily or weekly sales deltas).
+
+    Returns
+    -------
+    pd.DataFrame
+        The input DataFrame with additional engineered features, including:
+    """
+
+    # Adjust lags, diffs, and roll_windows to account for the 1-day forward shift in
+    # Shifted_Sales: Shifted_Sales[t] = Sales[t-1], so each offset already implies one
+    # extra day of look-back. Subtracting 1 day from each offset's kwds restores the
+    # original semantics (e.g. lag_days_7 still captures Sales 7 days before date t).
+    def _adj(offset: DateOffset) -> DateOffset:
+        kwds = dict(offset.kwds)
+        kwds['days'] = kwds.get('days', 0) - 1
+        return DateOffset(**kwds)
+
+    lags = [_adj(lag) for lag in _to_list(lags)]
+    diffs = [_adj(d) for d in _to_list(diffs)]
+    roll_windows = {w: [_adj(lag) for lag in _to_list(window_lags)]
+                    for w, window_lags in roll_windows.items()}
+
+    sales_df = df[['Date', 'Store', 'Shifted_Sales']]
+
+    # Competition-related features
+    df['CompetitionDistance'] = df['CompetitionDistance'].apply(np.log1p)
+    df['CompetitionSinceMonths'] = ( (df['Date'] - df['CompetitionSinceDate']).dt.days / 30.0 ).round()
+
+    # Calendar and seasonality features
+    df['is_weekend'] = df['Date'].dt.dayofweek >= 5
+    df['DayOfMonth'] = df['Date'].dt.day
+    df['is_month_start'] = (df['Date'].dt.day <= 3).astype(bool)
+    df['is_month_end'] = (df['Date'].dt.day >= 28).astype(bool)
+
+    # Basic date features
+    df['WeekOfYear'] = df['Date'].dt.isocalendar().week
+    df['Month'] = df['Date'].dt.month
+    df['Year'] = df['Date'].dt.year
+    df['Quarter'] = df['Date'].dt.quarter
+
+    # Cyclical features
+    cyclic_day_of_month = _make_cyclic(df['DayOfMonth'], period=31)
+    cyclic_day_of_month.index = pd.MultiIndex.from_frame(df[['Date', 'Store']])
+    cyclic_week_of_year = _make_cyclic(df['WeekOfYear'], period=52)
+    cyclic_week_of_year.index = pd.MultiIndex.from_frame(df[['Date', 'Store']])
+
+    # Lagged features
+    lag_df = _make_lags(sales_df, lags).set_index(['Date', 'Store'])
+
+    # Rolling window features
+    window_dfs = []
+    for window, lags in roll_windows.items():
+        window_df = _make_rolling(sales_df, window, lags).set_index(['Date', 'Store'])
+        window_dfs.append(window_df)
+
+    # First-order differencing features
+    diff_df = _make_differences(sales_df, diffs).set_index(['Date', 'Store'])
+
+    # Holiday proximity features
+    holiday_proximity_df = _make_holiday_proximity(df).set_index(['Date', 'Store'])
+
+    # Consecutive promotion days
+    consecutive_promo_df = _make_consecutive_promo(df, 'Promo').set_index(['Date', 'Store'])
+    consecutive_promo2_df = _make_consecutive_promo(df, 'Promo2').set_index(['Date', 'Store'])
+
+    # Merge everything (all feature DataFrames share the same (Date, Store) MultiIndex;
+    # join() on the index avoids duplicate Date/Store columns that pd.merge would produce)
+    feature_list = [cyclic_day_of_month, cyclic_week_of_year, lag_df, diff_df, holiday_proximity_df,
+                    consecutive_promo_df, consecutive_promo2_df] + window_dfs
+    merged = reduce(lambda left, right: left.join(right, how='outer'), feature_list).reset_index()
+    df = df.merge(merged, on=['Date', 'Store'], how='left')
+
+    # Target encoding of categorical features (time-aware: only historical dates used)
+    cat_cols = ['Store', 'Promo', 'Promo2', 'SchoolHoliday',
+                'Assortment', 'StoreType', 'StateHoliday',
+                'DayOfWeek', 'Quarter', 'Year', 'Month']
+
+    te_df = _target_encode(df, cat_cols, 'Shifted_Sales')
+    df.drop([c for c in cat_cols if c != 'Store'], axis=1, inplace=True)
+    df = df.merge(te_df.reset_index(), on=['Date', 'Store'], how='left')
+
+    # Cleanup
+    df.drop(['Promo2SinceDate', 'CompetitionSinceDate', 'DayOfMonth', 'WeekOfYear', 'Shifted_Sales'], axis=1, inplace=True)
+    df.set_index(['Date', 'Store'], inplace=True)
+
+    return df
