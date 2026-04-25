@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 
 
-def _in_promo2(row, date_col: str, interval_col: str, start_promo_date_col: str):
+def in_promo2(row, date_col: str, interval_col: str, start_promo_date_col: str):
     """
     Determine whether a given observation falls within an active Promo2 period.
 
@@ -62,13 +62,13 @@ def attach_store_data(df: pd.DataFrame, stores: pd.DataFrame) -> pd.DataFrame:
     """
 
     df = df.merge(stores, on='Store')
-    df['Promo2'] = df.apply(_in_promo2, args=('Date', 'PromoInterval', 'Promo2SinceDate'), axis=1).astype(int)
+    df['Promo2'] = df.apply(in_promo2, args=('Date', 'PromoInterval', 'Promo2SinceDate'), axis=1).astype(int)
     df.drop('PromoInterval', axis=1, inplace=True)
 
     return df
 
 
-def _make_consecutive_promo(df: pd.DataFrame, col: str = 'Promo') -> pd.DataFrame:
+def make_consecutive_promo(df: pd.DataFrame, col: str = 'Promo') -> pd.DataFrame:
     """
     Count consecutive days a store has been in a promotion streak, including the current day.
 

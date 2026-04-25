@@ -6,7 +6,7 @@ from typing import Iterable
 from pandas.tseries.offsets import DateOffset
 
 
-def _to_list(x):
+def to_list(x):
     """
     Normalize input to a list.
 
@@ -23,7 +23,7 @@ def _to_list(x):
     return [x] if isinstance(x, (int, DateOffset)) else list(x)
 
 
-def _pivot(df: pd.DataFrame) -> pd.DataFrame:
+def pivot(df: pd.DataFrame) -> pd.DataFrame:
     """
     Pivot a long-format DataFrame to wide format, sorted by index.
 
@@ -41,7 +41,7 @@ def _pivot(df: pd.DataFrame) -> pd.DataFrame:
             .sort_index())
 
 
-def _melt(df_wide: pd.DataFrame, name: str) -> pd.DataFrame:
+def melt(df_wide: pd.DataFrame, name: str) -> pd.DataFrame:
     """
     Melt a wide-format DataFrame back to long format with a specific value column name.
 
@@ -64,7 +64,7 @@ def _melt(df_wide: pd.DataFrame, name: str) -> pd.DataFrame:
             .set_index([index_name, columns_name]))
 
 
-def _align(df: pd.DataFrame, feature_dfs: list) -> pd.DataFrame:
+def align(df: pd.DataFrame, feature_dfs: list) -> pd.DataFrame:
     """
     Merge feature DataFrames with the original DataFrame, preserving row order and columns.
 

@@ -5,10 +5,10 @@ import pandas as pd
 from typing import Iterable
 from pandas.tseries.offsets import DateOffset
 
-from .utils import _to_list, _pivot, _melt, _align
+from .utils import to_list, pivot, melt, align
 
 
-def _make_differences(df: pd.DataFrame,
+def make_differences(df: pd.DataFrame,
                       diffs: int | Iterable[int]) -> pd.DataFrame:
     """
     Compute first-order differences of a time series for one or more lag periods,
@@ -33,8 +33,8 @@ def _make_differences(df: pd.DataFrame,
         - `"lag_1_<n>_<unit>_pct_change"` for each value of `d` in `diffs`.
     """
 
-    diffs = _to_list(diffs)
-    df_p = _pivot(df)
+    diffs = to_list(diffs)
+    df_p = pivot(df)
     feature_dfs = []
     for d in diffs:
         offset = d if isinstance(d, DateOffset) else DateOffset(days=d)
@@ -42,7 +42,7 @@ def _make_differences(df: pd.DataFrame,
         prior_index = df_p.index - offset
         df_p_prior = df_p.reindex(prior_index)
         df_p_prior.index = df_p.index
-        feature_dfs.append(_melt(df_p - df_p_prior,                   f"lag_1_{d_name}_diff"))
-        feature_dfs.append(_melt((df_p - df_p_prior).div(df_p_prior), f"lag_1_{d_name}_pct_change"))
+        feature_dfs.append(melt(df_p - df_p_prior,                   f"lag_1_{d_name}_diff"))
+        feature_dfs.append(melt((df_p - df_p_prior).div(df_p_prior), f"lag_1_{d_name}_pct_change"))
 
-    return _align(df, feature_dfs)
+    return align(df, feature_dfs)

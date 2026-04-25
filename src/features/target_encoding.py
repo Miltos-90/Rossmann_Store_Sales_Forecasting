@@ -3,7 +3,7 @@
 import pandas as pd
 
 
-def _target_encode(df: pd.DataFrame, cols: list, target: str) -> pd.DataFrame:
+def target_encode(df: pd.DataFrame, cols: list, target: str) -> pd.DataFrame:
     """
     Time-aware target encoding: each (store, category value) pair is replaced by the
     expanding historical mean of `target` for that pair across all dates strictly before

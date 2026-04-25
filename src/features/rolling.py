@@ -5,10 +5,10 @@ import pandas as pd
 from typing import Iterable
 from pandas.tseries.offsets import DateOffset
 
-from .utils import _to_list, _pivot, _melt, _align
+from .utils import to_list, pivot, melt, align
 
 
-def _make_rolling(df: pd.DataFrame,
+def make_rolling(df: pd.DataFrame,
                   windows: int | Iterable[int],
                   lags: int | Iterable[int]) -> pd.DataFrame:
     """
@@ -44,9 +44,9 @@ def _make_rolling(df: pd.DataFrame,
       of days.
     """
 
-    windows = _to_list(windows)
-    lags = _to_list(lags)
-    df_p = _pivot(df)
+    windows = to_list(windows)
+    lags = to_list(lags)
+    df_p = pivot(df)
     feature_dfs = []
     for lag in lags:
         offset = lag if isinstance(lag, DateOffset) else DateOffset(days=lag)
@@ -57,13 +57,13 @@ def _make_rolling(df: pd.DataFrame,
         for w in windows:
             roll = df_p_lagged.rolling(window=w)
             feature_dfs.extend([
-                _melt(roll.mean(),         f"lag_{lag_name}_roll_{w}_days_mean"),
-                _melt(roll.std(),          f"lag_{lag_name}_roll_{w}_days_std"),
-                _melt(roll.skew(),         f"lag_{lag_name}_roll_{w}_days_skew"),
-                _melt(roll.kurt(),         f"lag_{lag_name}_roll_{w}_days_kurt"),
-                _melt(roll.quantile(0.5),  f"lag_{lag_name}_roll_{w}_days_median"),
-                _melt(roll.quantile(0.1),  f"lag_{lag_name}_roll_{w}_days_10percentile"),
-                _melt(roll.quantile(0.9),  f"lag_{lag_name}_roll_{w}_days_90percentile"),
+                melt(roll.mean(),         f"lag_{lag_name}_roll_{w}_days_mean"),
+                melt(roll.std(),          f"lag_{lag_name}_roll_{w}_days_std"),
+                melt(roll.skew(),         f"lag_{lag_name}_roll_{w}_days_skew"),
+                melt(roll.kurt(),         f"lag_{lag_name}_roll_{w}_days_kurt"),
+                melt(roll.quantile(0.5),  f"lag_{lag_name}_roll_{w}_days_median"),
+                melt(roll.quantile(0.1),  f"lag_{lag_name}_roll_{w}_days_10percentile"),
+                melt(roll.quantile(0.9),  f"lag_{lag_name}_roll_{w}_days_90percentile"),
             ])
 
-    return _align(df, feature_dfs)
+    return align(df, feature_dfs)

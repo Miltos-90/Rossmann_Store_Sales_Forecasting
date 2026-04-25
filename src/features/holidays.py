@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 
 
-def _make_holiday_proximity(df: pd.DataFrame) -> pd.DataFrame:
+def make_holiday_proximity(df: pd.DataFrame) -> pd.DataFrame:
     """
     Compute proximity in days to the nearest state and school holidays per store.
 

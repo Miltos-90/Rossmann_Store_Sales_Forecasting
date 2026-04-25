@@ -7,14 +7,14 @@ from typing import Iterable, Dict
 from functools import reduce
 from pandas.tseries.offsets import DateOffset
 
-from .utils import _to_list
-from .lags import _make_lags
-from .rolling import _make_rolling
-from .differences import _make_differences
-from .cyclic import _make_cyclic
-from .holidays import _make_holiday_proximity
-from .promo import _make_consecutive_promo
-from .target_encoding import _target_encode
+from .utils import to_list
+from .lags import make_lags
+from .rolling import make_rolling
+from .differences import make_differences
+from .cyclic import make_cyclic
+from .holidays import make_holiday_proximity
+from .promo import make_consecutive_promo
+from .target_encoding import target_encode
 
 
 def make_features(df: pd.DataFrame,
@@ -53,9 +53,9 @@ def make_features(df: pd.DataFrame,
         kwds['days'] = kwds.get('days', 0) - 1
         return DateOffset(**kwds)
 
-    lags = [_adj(lag) for lag in _to_list(lags)]
-    diffs = [_adj(d) for d in _to_list(diffs)]
-    roll_windows = {w: [_adj(lag) for lag in _to_list(window_lags)]
+    lags = [_adj(lag) for lag in to_list(lags)]
+    diffs = [_adj(d) for d in to_list(diffs)]
+    roll_windows = {w: [_adj(lag) for lag in to_list(window_lags)]
                     for w, window_lags in roll_windows.items()}
 
     sales_df = df[['Date', 'Store', 'Shifted_Sales']]
@@ -77,29 +77,29 @@ def make_features(df: pd.DataFrame,
     df['Quarter'] = df['Date'].dt.quarter
 
     # Cyclical features
-    cyclic_day_of_month = _make_cyclic(df['DayOfMonth'], period=31)
+    cyclic_day_of_month = make_cyclic(df['DayOfMonth'], period=31)
     cyclic_day_of_month.index = pd.MultiIndex.from_frame(df[['Date', 'Store']])
-    cyclic_week_of_year = _make_cyclic(df['WeekOfYear'], period=52)
+    cyclic_week_of_year = make_cyclic(df['WeekOfYear'], period=52)
     cyclic_week_of_year.index = pd.MultiIndex.from_frame(df[['Date', 'Store']])
 
     # Lagged features
-    lag_df = _make_lags(sales_df, lags).set_index(['Date', 'Store'])
+    lag_df = make_lags(sales_df, lags).set_index(['Date', 'Store'])
 
     # Rolling window features
     window_dfs = []
     for window, lags in roll_windows.items():
-        window_df = _make_rolling(sales_df, window, lags).set_index(['Date', 'Store'])
+        window_df = make_rolling(sales_df, window, lags).set_index(['Date', 'Store'])
         window_dfs.append(window_df)
 
     # First-order differencing features
-    diff_df = _make_differences(sales_df, diffs).set_index(['Date', 'Store'])
+    diff_df = make_differences(sales_df, diffs).set_index(['Date', 'Store'])
 
     # Holiday proximity features
-    holiday_proximity_df = _make_holiday_proximity(df).set_index(['Date', 'Store'])
+    holiday_proximity_df = make_holiday_proximity(df).set_index(['Date', 'Store'])
 
     # Consecutive promotion days
-    consecutive_promo_df = _make_consecutive_promo(df, 'Promo').set_index(['Date', 'Store'])
-    consecutive_promo2_df = _make_consecutive_promo(df, 'Promo2').set_index(['Date', 'Store'])
+    consecutive_promo_df = make_consecutive_promo(df, 'Promo').set_index(['Date', 'Store'])
+    consecutive_promo2_df = make_consecutive_promo(df, 'Promo2').set_index(['Date', 'Store'])
 
     # Merge everything (all feature DataFrames share the same (Date, Store) MultiIndex;
     # join() on the index avoids duplicate Date/Store columns that pd.merge would produce)
@@ -113,7 +113,7 @@ def make_features(df: pd.DataFrame,
                 'Assortment', 'StoreType', 'StateHoliday',
                 'DayOfWeek', 'Quarter', 'Year', 'Month']
 
-    te_df = _target_encode(df, cat_cols, 'Shifted_Sales')
+    te_df = target_encode(df, cat_cols, 'Shifted_Sales')
     df.drop([c for c in cat_cols if c != 'Store'], axis=1, inplace=True)
     df = df.merge(te_df.reset_index(), on=['Date', 'Store'], how='left')
 

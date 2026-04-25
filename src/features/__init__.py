@@ -76,8 +76,8 @@ Encoded columns: ``Store``, ``Promo``, ``Promo2``, ``SchoolHoliday``,
 
 Sub-modules
 -----------
-- ``utils``           : shared helpers (_to_list, _pivot, _melt, _align)
-- ``promo``           : promotion features (attach_store_data, _make_consecutive_promo)
+- ``utils``           : shared helpers (to_list, pivot, melt, align)
+- ``promo``           : promotion features (attach_store_data, make_consecutive_promo)
 - ``holidays``        : holiday proximity features
 - ``cyclic``          : cyclic sin/cos encoding
 - ``lags``            : lag features and make_targets

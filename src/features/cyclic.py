@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 
 
-def _make_cyclic(s: pd.Series, period: int) -> pd.DataFrame:
+def make_cyclic(s: pd.Series, period: int) -> pd.DataFrame:
     """
     Convert a periodic numeric pandas Series into its cyclic (sin and cos) representation.
 

@@ -5,10 +5,10 @@ import pandas as pd
 from typing import Iterable
 from pandas.tseries.offsets import DateOffset
 
-from .utils import _to_list, _pivot, _melt, _align
+from .utils import to_list, pivot, melt, align
 
 
-def _make_lags(df: pd.DataFrame, lags: int | Iterable[int]) -> pd.DataFrame:
+def make_lags(df: pd.DataFrame, lags: int | Iterable[int]) -> pd.DataFrame:
     """
     Generate and merge multiple lagged feature DataFrames based on one or more DateOffset objects.
 
@@ -34,8 +34,8 @@ def _make_lags(df: pd.DataFrame, lags: int | Iterable[int]) -> pd.DataFrame:
     - The input DataFrame must be sorted in ascending time order.
     """
 
-    lags = _to_list(lags)
-    df_p = _pivot(df)
+    lags = to_list(lags)
+    df_p = pivot(df)
     lag_dfs = []
     for lag in lags:
         offset = lag if isinstance(lag, DateOffset) else DateOffset(days=lag)
@@ -43,9 +43,9 @@ def _make_lags(df: pd.DataFrame, lags: int | Iterable[int]) -> pd.DataFrame:
         prior_index = df_p.index - offset
         df_p_lagged = df_p.reindex(prior_index)
         df_p_lagged.index = df_p.index
-        lag_dfs.append(_melt(df_p_lagged, name))
+        lag_dfs.append(melt(df_p_lagged, name))
 
-    return _align(df, lag_dfs)
+    return align(df, lag_dfs)
 
 
 def make_targets(df: pd.DataFrame, horizon: int) -> pd.DataFrame:
@@ -72,6 +72,7 @@ def make_targets(df: pd.DataFrame, horizon: int) -> pd.DataFrame:
     """
 
     lags = range(-1, -(horizon + 1), -1)
-    lag_df = _make_lags(df, lags)
+    lag_df = make_lags(df, lags)
 
+    lag_df.set_index(['Date', 'Store'], inplace=True)
     return lag_df
