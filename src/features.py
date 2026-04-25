@@ -1,4 +1,79 @@
-""" Feature engineering-related functions. """
+"""
+Feature engineering for the Rossmann Store Sales forecasting pipeline.
+
+All features are constructed from ``Shifted_Sales`` (i.e. ``Sales`` shifted
+forward by one day per store) to prevent any leakage of current-day sales
+into the feature set.  The ``lags``, ``diffs``, and ``roll_windows`` arguments
+passed to ``make_features`` are expressed in terms of the **original Sales
+axis**; the function internally reduces every offset by one day to compensate
+for the shift.
+
+Features produced by ``make_features``
+---------------------------------------
+
+Competition
+~~~~~~~~~~~
+- ``CompetitionDistance``       : log1p-transformed distance (metres) to the nearest competitor.
+- ``CompetitionSinceMonths``    : number of months elapsed since the nearest competitor opened.
+
+Calendar / seasonality
+~~~~~~~~~~~~~~~~~~~~~~
+- ``Year``                      : calendar year.
+- ``Month``                     : calendar month (1–12).
+- ``Quarter``                   : calendar quarter (1–4).
+- ``DayOfWeek``                 : day of week (1 = Monday … 7 = Sunday).
+- ``is_weekend``                : bool – True for Saturday and Sunday.
+- ``is_month_start``            : bool – True for days 1–3 of the month.
+- ``is_month_end``              : bool – True for days 28–31 of the month.
+- ``DayOfMonth_sin / _cos``     : cyclic (sin/cos) encoding of the day of month (period 31).
+- ``WeekOfYear_sin / _cos``     : cyclic (sin/cos) encoding of the ISO week number (period 52).
+
+Promotion
+~~~~~~~~~
+- ``Promo``                     : binary flag for the regular one-time promotion.
+- ``Promo2``                    : binary flag indicating an active running Promo2 interval
+                                  for the store on that date.
+- ``consecutive_promo_days``    : number of consecutive days the store has been in a
+                                  Promo streak up to and including the current day.
+- ``consecutive_promo2_days``   : same for Promo2.
+
+School / state holidays
+~~~~~~~~~~~~~~~~~~~~~~~
+- ``SchoolHoliday``             : binary flag for a school holiday.
+- ``StateHoliday``              : categorical code for public holidays (0 = none, a/b/c = type).
+- ``days_to_next_state_holiday``: days until the next public holiday for the store's state.
+- ``days_since_last_state_holiday``: days since the most recent public holiday.
+- ``days_to_next_school_holiday``: days until the next school holiday.
+
+Lag features  (one column per lag in ``lags``)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Named ``lag_<n>_<unit>`` where n/unit are derived from the adjusted DateOffset
+(e.g. ``lag_6_days`` corresponds to a 7-day lag on original Sales).
+Each value is ``Shifted_Sales`` looked up ``n <unit>`` before the current date.
+
+Rolling-window statistics  (per window size × lag combination)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Named ``lag_<lag>_roll_<w>_days_<stat>`` where ``<stat>`` ∈
+{mean, std, skew, kurt, median, 10percentile, 90percentile}.
+Computed over a window of ``w`` trading days on ``Shifted_Sales`` starting
+from the adjusted lag offset.
+
+First-order differences  (one pair per entry in ``diffs``)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+- ``lag_1_<n>_<unit>_diff``        : absolute change in ``Shifted_Sales`` over the period.
+- ``lag_1_<n>_<unit>_pct_change``  : relative (%) change over the same period.
+
+Target-encoded categoricals  (time-aware, per store)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Named ``<col>_te``.  For each categorical column listed below, the value is
+the expanding historical mean of ``Shifted_Sales`` for the (store, category)
+pair up to — but **not including** — the current date, preventing lookahead
+leakage.
+
+Encoded columns: ``Store``, ``Promo``, ``Promo2``, ``SchoolHoliday``,
+``Assortment``, ``StoreType``, ``StateHoliday``, ``DayOfWeek``,
+``Quarter``, ``Year``, ``Month``.
+"""
 
 import pandas as pd
 import numpy as np
@@ -332,7 +407,7 @@ def _make_differences(df: pd.DataFrame,
     """
 
     diffs = _to_list(diffs)
-    df_p = _pivot(df).shift(freq=DateOffset(days=1))  # 1-day lag to prevent data leakage
+    df_p = _pivot(df)
     feature_dfs = []
     for d in diffs:
         offset = d if isinstance(d, DateOffset) else DateOffset(days=d)
@@ -344,6 +419,167 @@ def _make_differences(df: pd.DataFrame,
         feature_dfs.append(_melt((df_p - df_p_prior).div(df_p_prior), f"lag_1_{d_name}_pct_change"))
 
     return _align(df, feature_dfs)
+
+def _make_holiday_proximity(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Compute proximity in days to the nearest state and school holidays per store.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame containing 'Date', 'Store', 'StateHoliday', 'SchoolHoliday' columns.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with columns ['Date', 'Store', 'days_to_next_state_holiday',
+        'days_since_last_state_holiday', 'days_to_next_school_holiday'].
+    """
+    ns_per_day = 86_400 * 10 ** 9  # nanoseconds in a day; used to convert int64 timestamp differences back to days
+    result_dfs = []
+
+    for store_id, group in df[['Date', 'Store', 'StateHoliday', 'SchoolHoliday']].groupby('Store'):
+        group = group.sort_values('Date')
+        # Convert dates to int64 nanoseconds so we can do fast arithmetic with numpy
+        dates_ns = group['Date'].values.astype('int64')
+
+        # StateHoliday is '0' (string) or 0 (int) when there is no holiday; anything else is a real holiday
+        is_state_hol = ~group['StateHoliday'].isin(['0', 0]) & group['StateHoliday'].notna()
+        state_hol_ns = group.loc[is_state_hol, 'Date'].values.astype('int64')  # sorted holiday timestamps
+
+        is_school_hol = group['SchoolHoliday'] == 1
+        school_hol_ns = group.loc[is_school_hol, 'Date'].values.astype('int64')  # sorted holiday timestamps
+
+        if len(state_hol_ns) > 0:
+            # searchsorted(side='left') gives the index of the first holiday >= current date
+            idx_next = np.searchsorted(state_hol_ns, dates_ns, side='left')
+            has_next = idx_next < len(state_hol_ns)  # False for dates after the last known holiday
+            days_to_next_state = np.where(
+                has_next,
+                (state_hol_ns[np.minimum(idx_next, len(state_hol_ns) - 1)] - dates_ns) / ns_per_day,
+                np.nan)  # NaN when no future holiday exists in the dataset
+
+            # searchsorted(side='right') - 1 gives the index of the last holiday <= current date
+            idx_prev = np.searchsorted(state_hol_ns, dates_ns, side='right') - 1
+            has_prev = idx_prev >= 0  # False for dates before the first known holiday
+            days_since_last_state = np.where(
+                has_prev,
+                (dates_ns - state_hol_ns[np.maximum(idx_prev, 0)]) / ns_per_day,
+                np.nan)  # NaN when no past holiday exists in the dataset
+        else:
+            days_to_next_state = np.full(len(group), np.nan)
+            days_since_last_state = np.full(len(group), np.nan)
+
+        if len(school_hol_ns) > 0:
+            idx_next = np.searchsorted(school_hol_ns, dates_ns, side='left')
+            has_next = idx_next < len(school_hol_ns)
+            days_to_next_school = np.where(
+                has_next,
+                (school_hol_ns[np.minimum(idx_next, len(school_hol_ns) - 1)] - dates_ns) / ns_per_day,
+                np.nan)
+        else:
+            days_to_next_school = np.full(len(group), np.nan)
+
+        result_dfs.append(pd.DataFrame({
+            'Date': group['Date'].values,
+            'Store': store_id,
+            'days_to_next_state_holiday': days_to_next_state,
+            'days_since_last_state_holiday': days_since_last_state,
+            'days_to_next_school_holiday': days_to_next_school,
+        }))
+
+    return pd.concat(result_dfs, ignore_index=True)
+
+
+def _make_consecutive_promo(df: pd.DataFrame, col: str = 'Promo') -> pd.DataFrame:
+    """
+    Count consecutive days a store has been in a promotion streak, including the current day.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame containing 'Date', 'Store', and `col` columns.
+    col : str
+        Name of the binary promo column to streak-count (e.g. 'Promo' or 'Promo2').
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with columns ['Date', 'Store', f'consecutive_{col.lower()}_days'].
+    """
+    result_dfs = []
+    out_col = f'consecutive_{col.lower()}_days'
+
+    for store_id, group in df[['Date', 'Store', col]].groupby('Store'):
+        group = group.sort_values('Date')
+        promo = group[col].values
+        consecutive = np.zeros(len(promo), dtype=int)
+        for i in range(len(promo)):
+            if promo[i] == 1:
+                consecutive[i] = (consecutive[i - 1] + 1) if i > 0 else 1
+
+        result_dfs.append(pd.DataFrame({
+            'Date': group['Date'].values,
+            'Store': store_id,
+            out_col: consecutive,
+        }))
+
+    return pd.concat(result_dfs, ignore_index=True)
+
+
+def _target_encode(df: pd.DataFrame, cols: list, target: str) -> pd.DataFrame:
+    """
+    Time-aware target encoding: each (store, category value) pair is replaced by the
+    expanding historical mean of `target` for that pair across all dates strictly before
+    the current date.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame containing 'Date', 'Store', the columns in `cols`, and `target`.
+    cols : list of str
+        Categorical columns to encode.
+    target : str
+        Name of the target column to compute means from.
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame indexed by ['Date', 'Store'] with one `<col>_te` column per entry in `cols`.
+    """
+    result = df[['Date', 'Store']].copy()
+
+    for col in cols:
+        if col not in df.columns:
+            continue
+        # Use dict.fromkeys throughout to deduplicate keys when col == 'Store'
+        group_keys  = list(dict.fromkeys(['Date', 'Store', col]))
+        expand_keys = list(dict.fromkeys(['Store', col]))
+        merge_on    = list(dict.fromkeys(['Date', 'Store', col]))
+
+        # Aggregate to daily level per (date, store, category) to avoid within-day
+        # duplicate rows biasing the expanding mean
+        daily = (
+            df.groupby(group_keys)[target]
+            .mean()
+            .reset_index()
+            .sort_values('Date')
+        )
+        # shift(1) excludes the current date from its own encoding;
+        # expanding mean is computed per (store, category value)
+        daily[f'{col}_te'] = (
+            daily.groupby(expand_keys)[target]
+            .transform(lambda x: x.shift(1).expanding().mean())
+        )
+        col_te = (
+            df[group_keys]
+            .merge(daily[merge_on + [f'{col}_te']], on=merge_on, how='left')
+            [['Date', 'Store', f'{col}_te']]
+        )
+        result = result.merge(col_te, on=['Date', 'Store'], how='left')
+
+    return result.set_index(['Date', 'Store'])
+
 
 def make_features(df: pd.DataFrame,
                   lags: int | Iterable[int],
@@ -372,19 +608,31 @@ def make_features(df: pd.DataFrame,
         The input DataFrame with additional engineered features, including:
     """
 
-    sales_df = df[['Date', 'Store', 'Sales']]
-    
+    # Adjust lags, diffs, and roll_windows to account for the 1-day forward shift in
+    # Shifted_Sales: Shifted_Sales[t] = Sales[t-1], so each offset already implies one
+    # extra day of look-back. Subtracting 1 day from each offset's kwds restores the
+    # original semantics (e.g. lag_days_7 still captures Sales 7 days before date t).
+    def _adj(offset: DateOffset) -> DateOffset:
+        kwds = dict(offset.kwds)
+        kwds['days'] = kwds.get('days', 0) - 1
+        return DateOffset(**kwds)
+
+    lags = [_adj(lag) for lag in _to_list(lags)]
+    diffs = [_adj(d) for d in _to_list(diffs)]
+    roll_windows = {w: [_adj(lag) for lag in _to_list(window_lags)]
+                    for w, window_lags in roll_windows.items()}
+
+    sales_df = df[['Date', 'Store', 'Shifted_Sales']]
+
     # Competition-related features
     df['CompetitionDistance'] = df['CompetitionDistance'].apply(np.log1p)
     df['CompetitionSinceMonths'] = ( (df['Date'] - df['CompetitionSinceDate']).dt.days / 30.0 ).round()
 
-    # Promotion-related features
-    df['Promo2SinceWeeks'] = (df['Date'] - df['Promo2SinceDate']).dt.days / 7.0
-    df['Promo2SinceWeeks'] = df['Promo2SinceWeeks'].fillna(0).round().astype(int) 
-    df['Promo2SinceWeeks'] = df['Promo2SinceWeeks'] * df['Promo2'] # essentially a boolean mask
-
     # Calendar and seasonality features
     df['is_weekend'] = df['Date'].dt.dayofweek >= 5
+    df['DayOfMonth'] = df['Date'].dt.day
+    df['is_month_start'] = (df['Date'].dt.day <= 3).astype(bool)
+    df['is_month_end'] = (df['Date'].dt.day >= 28).astype(bool)
 
     # Basic date features
     df['WeekOfYear'] = df['Date'].dt.isocalendar().week
@@ -393,11 +641,11 @@ def make_features(df: pd.DataFrame,
     df['Quarter'] = df['Date'].dt.quarter
 
     # Cyclical features
-    cyclic_month = _make_cyclic(df['Month'], period=12)
-    cyclic_week = _make_cyclic(df['DayOfWeek'], period=7)
-    cyclic_month.index = pd.MultiIndex.from_frame(df[['Date', 'Store']])
-    cyclic_week.index = pd.MultiIndex.from_frame(df[['Date', 'Store']])
-
+    cyclic_day_of_month = _make_cyclic(df['DayOfMonth'], period=31)
+    cyclic_day_of_month.index = pd.MultiIndex.from_frame(df[['Date', 'Store']])
+    cyclic_week_of_year = _make_cyclic(df['WeekOfYear'], period=52)
+    cyclic_week_of_year.index = pd.MultiIndex.from_frame(df[['Date', 'Store']])
+    
     # Lagged features
     lag_df = _make_lags(sales_df, lags).set_index(['Date', 'Store'])
 
@@ -410,12 +658,31 @@ def make_features(df: pd.DataFrame,
     # First-order differencing features
     diff_df = _make_differences(sales_df, diffs).set_index(['Date', 'Store'])
 
-    # Merge everything
-    feature_list = [cyclic_month, cyclic_week, lag_df, diff_df] + window_dfs
-    merged = reduce(lambda left, right: pd.merge(left, right, on=["Date", "Store"], how="outer"), feature_list).reset_index()
-    df = df.merge(merged, how='left')
+    # Holiday proximity features
+    holiday_proximity_df = _make_holiday_proximity(df).set_index(['Date', 'Store'])
 
-    # Drop useless columns
-    df.drop(['Promo2SinceDate', 'CompetitionSinceDate', 'Sales'], axis=1, inplace=True)
+    # Consecutive promotion days
+    consecutive_promo_df = _make_consecutive_promo(df, 'Promo').set_index(['Date', 'Store'])
+    consecutive_promo2_df = _make_consecutive_promo(df, 'Promo2').set_index(['Date', 'Store'])
+
+    # Merge everything (all feature DataFrames share the same (Date, Store) MultiIndex;
+    # join() on the index avoids duplicate Date/Store columns that pd.merge would produce)
+    feature_list = [cyclic_day_of_month, cyclic_week_of_year, lag_df, diff_df, holiday_proximity_df,
+                    consecutive_promo_df, consecutive_promo2_df] + window_dfs
+    merged = reduce(lambda left, right: left.join(right, how='outer'), feature_list).reset_index()
+    df = df.merge(merged, on=['Date', 'Store'], how='left')
+
+    # Target encoding of categorical features (time-aware: only historical dates used)
+    cat_cols = ['Store', 'Promo', 'Promo2', 'SchoolHoliday',
+                'Assortment', 'StoreType', 'StateHoliday',
+                'DayOfWeek', 'Quarter', 'Year', 'Month']
+
+    te_df = _target_encode(df, cat_cols, 'Shifted_Sales')
+    df.drop([c for c in cat_cols if c != 'Store'], axis=1, inplace=True)
+    df = df.merge(te_df.reset_index(), on=['Date', 'Store'], how='left')
+
+    # Cleanup
+    df.drop(['Promo2SinceDate', 'CompetitionSinceDate', 'DayOfMonth', 'WeekOfYear', 'Shifted_Sales'], axis=1, inplace=True)
+    df.set_index(['Date', 'Store'], inplace=True)
 
     return df
