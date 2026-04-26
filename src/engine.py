@@ -3,16 +3,12 @@
 from __future__ import annotations
 
 import numpy as np
-import pandas as pd
+import xgboost as xgb
 
 from sklearn.model_selection import TimeSeriesSplit
 
 from .xgb_forecaster import XGBForecaster
 
-
-# ---------------------------------------------------------------------------
-# Metrics
-# ---------------------------------------------------------------------------
 
 def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
     """Compute common forecasting accuracy metrics.
@@ -51,14 +47,9 @@ def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
     return {"MAE": mae, "RMSE": rmse, "MAPE": mape, "RMSPE": rmspe, "R2": r2}
 
 
-# ---------------------------------------------------------------------------
-# Cross-validation
-# ---------------------------------------------------------------------------
-
 def cross_validate(
     forecaster: XGBForecaster,
-    X: np.ndarray | pd.DataFrame,
-    y: np.ndarray | pd.DataFrame,
+    dm: xgb.DMatrix,
     n_splits: int = 5,
 ) -> dict:
     """Time-series cross-validation using ``sklearn.model_selection.TimeSeriesSplit``.
@@ -72,8 +63,9 @@ def cross_validate(
     forecaster : XGBForecaster
         Forecaster instance whose ``fit`` and ``predict`` methods are called
         on each fold.
-    X : array-like of shape (n_samples, n_features)
-    y : array-like of shape (n_samples, horizon) or (n_samples,)
+    dm : xgb.DMatrix
+        Full dataset with labels embedded.  Row order must match the
+        temporal order of the time series.
     n_splits : int
         Number of CV folds.
 
@@ -84,19 +76,21 @@ def cross_validate(
         ``mean``         — metric means across folds.
         ``std``          — metric standard deviations across folds.
     """
-    X_arr = np.asarray(X, dtype=float)
-    y_arr = np.asarray(y, dtype=float)
-
+    num_samples = dm.num_row()
     tscv = TimeSeriesSplit(n_splits=n_splits)
     fold_metrics: list[dict] = []
 
-    for fold, (train_idx, val_idx) in enumerate(tscv.split(X_arr), start=1):
-        X_train, X_val = X_arr[train_idx], X_arr[val_idx]
-        y_train, y_val = y_arr[train_idx], y_arr[val_idx]
+    for fold, (train_idx, val_idx) in enumerate(tscv.split(np.arange(num_samples)), start=1):
+        train_dm = dm.slice(train_idx)
+        val_dm   = dm.slice(val_idx)
 
         # Fit without early stopping — val fold must stay unseen during training
-        forecaster.fit(X_train, y_train)
-        preds = forecaster.predict(X_val)
+        forecaster.fit(train_dm)
+        preds = forecaster.predict(val_dm)
+
+        y_val = val_dm.get_label()
+        if forecaster.horizon > 1:
+            y_val = y_val.reshape(-1, forecaster.horizon)
 
         metrics = compute_metrics(y_val, preds)
         fold_metrics.append(metrics)
