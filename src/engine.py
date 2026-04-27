@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import numpy as np
-import xgboost as xgb
 
 from sklearn.model_selection import TimeSeriesSplit
 
 from .xgb_forecaster import XGBForecaster
+from .utils import make_dmatrix
 
 
 def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
@@ -49,8 +49,10 @@ def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
 
 def cross_validate(
     forecaster: XGBForecaster,
-    dm: xgb.DMatrix,
+    X: np.ndarray,
+    y: np.ndarray,
     n_splits: int = 5,
+    batch_size: int | None = None,
 ) -> dict:
     """Time-series cross-validation using ``sklearn.model_selection.TimeSeriesSplit``.
 
@@ -63,11 +65,15 @@ def cross_validate(
     forecaster : XGBForecaster
         Forecaster instance whose ``fit`` and ``predict`` methods are called
         on each fold.
-    dm : xgb.DMatrix
-        Full dataset with labels embedded.  Row order must match the
-        temporal order of the time series.
+    X : np.ndarray
+        Feature matrix. Row order must match the temporal order of the time series.
+    y : np.ndarray
+        Labels. Row order must match X.
     n_splits : int
         Number of CV folds.
+    batch_size : int, optional
+        Passed to ``make_dmatrix``; when set, training folds use a
+        QuantileDMatrix rather than a plain DMatrix.
 
     Returns
     -------
@@ -76,23 +82,18 @@ def cross_validate(
         ``mean``         — metric means across folds.
         ``std``          — metric standard deviations across folds.
     """
-    num_samples = dm.num_row()
     tscv = TimeSeriesSplit(n_splits=n_splits)
     fold_metrics: list[dict] = []
 
-    for fold, (train_idx, val_idx) in enumerate(tscv.split(np.arange(num_samples)), start=1):
-        train_dm = dm.slice(train_idx)
-        val_dm   = dm.slice(val_idx)
+    for fold, (train_idx, val_idx) in enumerate(tscv.split(np.arange(len(X))), start=1):
+        train_dm = make_dmatrix(X[train_idx], y[train_idx], batch_size)
+        val_dm   = make_dmatrix(X[val_idx])
 
         # Fit without early stopping — val fold must stay unseen during training
         forecaster.fit(train_dm)
         preds = forecaster.predict(val_dm)
 
-        y_val = val_dm.get_label()
-        if forecaster.horizon > 1:
-            y_val = y_val.reshape(-1, forecaster.horizon)
-
-        metrics = compute_metrics(y_val, preds)
+        metrics = compute_metrics(y[val_idx], preds)
         fold_metrics.append(metrics)
         print(f"  Fold {fold}: " + ", ".join(f"{k}={v:.4f}" for k, v in metrics.items()))
 
