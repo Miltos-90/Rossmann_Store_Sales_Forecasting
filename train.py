@@ -6,8 +6,6 @@ import math
 import numpy as np
 import pandas as pd
 import xgboost as xgb
-from xgboost import XGBRegressor
-from typing import Optional
 
 # ---------------------------------------------------------------------------
 # Config
@@ -68,25 +66,20 @@ def build_dataset(
 # Batch helpers
 # ---------------------------------------------------------------------------
 
-def make_batches(
-    X: np.ndarray, y: np.ndarray, batch_size: int
-):
-    """Yield (X_batch, y_batch) slices of ``batch_size`` rows."""
-    n = len(X)
+def make_batches(n: int, batch_size: int):
+    """Yield (start, end) index pairs for batches of ``batch_size`` rows."""
     for start in range(0, n, batch_size):
-        end = min(start + batch_size, n)
-        yield X[start:end], y[start:end]
+        yield start, min(start + batch_size, n)
 
 
 # ---------------------------------------------------------------------------
 # Evaluation
 # ---------------------------------------------------------------------------
 
-def evaluate(model: XGBRegressor, X: np.ndarray, y: np.ndarray) -> dict[str, float]:
+def evaluate(booster: xgb.Booster, dm: xgb.DMatrix) -> dict[str, float]:
     """Return RMSE and RMSPE for the given split."""
-    dm     = xgb.DMatrix(X, enable_categorical=True) 
-    y_pred = np.asarray(model.get_booster().predict(dm), dtype=float)
-    y_true    = np.asarray(y, dtype=float)
+    y_pred = np.asarray(booster.predict(dm), dtype=float)
+    y_true    = np.asarray(dm.get_label(), dtype=float)
     residuals = (y_true - y_pred).ravel()
     y_flat    = y_true.ravel()
 
@@ -124,40 +117,43 @@ if __name__ == "__main__":
     y_train, y_val = y[:split], y[split:]
     print(f"Train: {X_train.shape}  Val: {X_val.shape}  Horizon: {HORIZON}")
 
-    print(f"\nTraining (batch_size={BATCH_SIZE}, sklearn API) …")
+    print(f"\nTraining (batch_size={BATCH_SIZE}, native API) …")
     params = PARAMS.copy()
     n_estimators          = int(params.pop("n_estimators"))
     early_stopping_rounds = int(params.pop("early_stopping_rounds"))
     n_batches       = math.ceil(len(X_train) / BATCH_SIZE)
     trees_per_batch = max(1, n_estimators // n_batches)
 
+    dtrain = xgb.DMatrix(X_train, y_train, feature_types=feature_types, enable_categorical=True)
+    deval  = xgb.DMatrix(X_val,   y_val,   feature_types=feature_types, enable_categorical=True)
     booster = None  # Initial booster for warm start; will be updated after each batch
-    iterator = make_batches(X_train, y_train, BATCH_SIZE)
-    for i, (X_batch, y_batch) in enumerate(iterator, start=1):
 
-        # Initialize model 
+    for i, (start, end) in enumerate(make_batches(len(X_train), BATCH_SIZE), start=1):
         is_last = i == n_batches
-        model = XGBRegressor(n_estimators=trees_per_batch,
-                             feature_types=feature_types,
-                             enable_categorical=True,
-                             early_stopping_rounds=early_stopping_rounds if is_last else None, #  only apply early stopping on the last batch
-                             **params)
+        dtrain_batch  = dtrain.slice(list(range(start, end)))
 
-        # Fit on current batch, using previous booster for warm start if available
-        fit_kwargs = {"eval_set": [(X_val, y_val)], "verbose": False, "xgb_model": booster}
-        model.fit(X_batch, y_batch, **fit_kwargs)
+        # Build xgb.train kwargs; only apply early stopping on the last batch
+        train_kwargs = dict(
+            params=params,
+            dtrain=dtrain_batch,
+            num_boost_round=trees_per_batch,
+            evals=[(deval, "val")],
+            verbose_eval=False,
+            xgb_model=booster,
+        )
+        if is_last:
+            train_kwargs["early_stopping_rounds"] = early_stopping_rounds
 
-        # Keep booster for next batch
-        booster = model.get_booster()
+        booster = xgb.train(**train_kwargs)
 
         # Log batch progress
-        cfg     = json.loads(booster.save_config())
-        device  = cfg.get("learner", {}).get("generic_param", {}).get("device", "unknown")
-        print(f"  Batch {i:2d}/{n_batches:3d} - X shape: {X_batch.shape} - y shape: {y_batch.shape} - cumulative trees: {booster.num_boosted_rounds()} - device: {device}")
+        cfg    = json.loads(booster.save_config())
+        device = cfg.get("learner", {}).get("generic_param", {}).get("device", "unknown")
+        print(f"  Batch {i:2d}/{n_batches:3d} - rows: {start}:{end} ({end - start}) - cumulative trees: {booster.num_boosted_rounds()} - device: {device}")
 
     # Final evaluation
-    train_metrics = evaluate(model, X_train, y_train)
-    val_metrics   = evaluate(model, X_val,   y_val)
+    train_metrics = evaluate(booster, dtrain)
+    val_metrics   = evaluate(booster, deval)
 
     print("\nTrain:", {k: f"{v:.4f}" for k, v in train_metrics.items()})
     print("Val  :", {k: f"{v:.4f}" for k, v in val_metrics.items()})
