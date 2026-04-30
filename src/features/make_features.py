@@ -14,7 +14,6 @@ from .differences import make_differences
 from .cyclic import make_cyclic
 from .holidays import make_holiday_proximity
 from .promo import make_consecutive_promo
-from .target_encoding import target_encode
 
 
 def make_features(df: pd.DataFrame,
@@ -43,22 +42,11 @@ def make_features(df: pd.DataFrame,
     pd.DataFrame
         The input DataFrame with additional engineered features, including:
     """
+    lags = to_list(lags)
+    diffs = to_list(diffs)
+    roll_windows = {w: to_list(window_lags) for w, window_lags in roll_windows.items()}
 
-    # Adjust lags, diffs, and roll_windows to account for the 1-day forward shift in
-    # Shifted_Sales: Shifted_Sales[t] = Sales[t-1], so each offset already implies one
-    # extra day of look-back. Subtracting 1 day from each offset's kwds restores the
-    # original semantics (e.g. lag_days_7 still captures Sales 7 days before date t).
-    def _adj(offset: DateOffset) -> DateOffset:
-        kwds = dict(offset.kwds)
-        kwds['days'] = kwds.get('days', 0) - 1
-        return DateOffset(**kwds)
-
-    lags = [_adj(lag) for lag in to_list(lags)]
-    diffs = [_adj(d) for d in to_list(diffs)]
-    roll_windows = {w: [_adj(lag) for lag in to_list(window_lags)]
-                    for w, window_lags in roll_windows.items()}
-
-    sales_df = df[['Date', 'Store', 'Shifted_Sales']]
+    sales_df = df[['Date', 'Store', 'Sales']]
 
     # Competition-related features
     df['CompetitionDistance'] = df['CompetitionDistance'].apply(np.log1p)
@@ -108,17 +96,18 @@ def make_features(df: pd.DataFrame,
     merged = reduce(lambda left, right: left.join(right, how='outer'), feature_list).reset_index()
     df = df.merge(merged, on=['Date', 'Store'], how='left')
 
-    # Target encoding of categorical features (time-aware: only historical dates used)
-    cat_cols = ['Store', 'Promo', 'Promo2', 'SchoolHoliday',
+    # Encode categorical features as pandas Categorical dtype
+    cat_cols = ['Promo', 'Promo2', 'SchoolHoliday',
                 'Assortment', 'StoreType', 'StateHoliday',
-                'DayOfWeek', 'Quarter', 'Year', 'Month']
+                'DayOfWeek', 'Quarter', 'Year', 'Month', 'Open', 'is_month_end', 'is_month_start', 'is_weekend']
 
-    te_df = target_encode(df, cat_cols, 'Shifted_Sales')
-    df.drop([c for c in cat_cols if c != 'Store'], axis=1, inplace=True)
-    df = df.merge(te_df.reset_index(), on=['Date', 'Store'], how='left')
+    for col in cat_cols:
+        if col in df.columns:
+            df[col] = pd.Categorical(df[col])
 
     # Cleanup
-    df.drop(['Promo2SinceDate', 'CompetitionSinceDate', 'DayOfMonth', 'WeekOfYear', 'Shifted_Sales'], axis=1, inplace=True)
+    df.drop(['Promo2SinceDate', 'CompetitionSinceDate', 'DayOfMonth', 'WeekOfYear', 'Sales'], axis=1, inplace=True)
+    df['Store_id'] = df['Store'].astype('category') # we need it as a feature
     df.set_index(['Date', 'Store'], inplace=True)
 
     return df

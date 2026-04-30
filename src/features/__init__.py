@@ -1,12 +1,36 @@
 """
-Feature engineering for the Rossmann Store Sales forecasting pipeline.
+Feature engineering pipeline.
 
-All features are constructed from ``Shifted_Sales`` (i.e. ``Sales`` shifted
-forward by one day per store) to prevent any leakage of current-day sales
-into the feature set.  The ``lags``, ``diffs``, and ``roll_windows`` arguments
-passed to ``make_features`` are expressed in terms of the **original Sales
-axis**; the function internally reduces every offset by one day to compensate
-for the shift.
+All features are constructed from the ``Sales`` column.
+The ``lags``, ``diffs``, and ``roll_windows`` arguments passed to
+``make_features`` are expressed as ``DateOffset`` objects or integer days.
+
+
+Expected input columns for ``make_features``
+---------------------------------------------
+The DataFrame passed to ``make_features`` must contain the following columns:
+
+=========================  ============================================================
+Column                     Description
+=========================  ============================================================
+``Date``                   ``datetime64`` date of the observation.
+``Store``                  Integer store identifier.
+``Sales``                  Historical sales for the store on that date — the source
+                           for all lag/rolling/diff features.
+``DayOfWeek``              Day of week (1 = Monday … 7 = Sunday).
+``Open``                   Binary flag — whether the store was open (1) or closed (0).
+``Promo``                  Binary flag for the regular one-time promotion.
+``Promo2``                 Binary flag indicating an active Promo2 interval.
+``Promo2SinceDate``        Date from which Promo2 was active (``NaT`` if never).
+``StateHoliday``           Public-holiday code (``'0'`` / ``0`` = none; ``'a'``/
+                           ``'b'``/``'c'`` = holiday type).
+``SchoolHoliday``          Binary flag for a school holiday.
+``StoreType``              Store format category (``'a'``–``'d'``).
+``Assortment``             Assortment level (``'a'``–``'c'``).
+``CompetitionDistance``    Distance in metres to the nearest competitor store.
+``CompetitionSinceDate``   Date the nearest competitor opened (used to compute
+                           ``CompetitionSinceMonths``).
+=========================  ============================================================
 
 Features produced by ``make_features``
 ---------------------------------------
@@ -47,32 +71,31 @@ School / state holidays
 
 Lag features  (one column per lag in ``lags``)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Named ``lag_<n>_<unit>`` where n/unit are derived from the adjusted DateOffset
-(e.g. ``lag_6_days`` corresponds to a 7-day lag on original Sales).
-Each value is ``Shifted_Sales`` looked up ``n <unit>`` before the current date.
+Named ``lag_<n>_<unit>`` where n/unit are derived from the DateOffset
+(e.g. ``lag_7_days`` for a 7-day lag).
+Each value is ``Sales`` looked up ``n <unit>`` before the current date.
 
 Rolling-window statistics  (per window size × lag combination)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Named ``lag_<lag>_roll_<w>_days_<stat>`` where ``<stat>`` ∈
 {mean, std, skew, kurt, median, 10percentile, 90percentile}.
-Computed over a window of ``w`` trading days on ``Shifted_Sales`` starting
-from the adjusted lag offset.
+Computed over a window of ``w`` days on ``Sales`` starting from the lag offset.
 
 First-order differences  (one pair per entry in ``diffs``)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-- ``lag_1_<n>_<unit>_diff``        : absolute change in ``Shifted_Sales`` over the period.
+- ``lag_1_<n>_<unit>_diff``        : absolute change in ``Sales`` over the period.
 - ``lag_1_<n>_<unit>_pct_change``  : relative (%) change over the same period.
 
 Target-encoded categoricals  (time-aware, per store)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Named ``<col>_te``.  For each categorical column listed below, the value is
-the expanding historical mean of ``Shifted_Sales`` for the (store, category)
-pair up to — but **not including** — the current date, preventing lookahead
-leakage.
+the expanding historical mean of ``Sales`` for the (store, category) pair
+up to — but **not including** — the current date, preventing lookahead leakage.
 
 Encoded columns: ``Store``, ``Promo``, ``Promo2``, ``SchoolHoliday``,
 ``Assortment``, ``StoreType``, ``StateHoliday``, ``DayOfWeek``,
 ``Quarter``, ``Year``, ``Month``.
+
 
 Sub-modules
 -----------
