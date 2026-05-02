@@ -15,6 +15,13 @@ from .cyclic import make_cyclic
 from .holidays import make_holiday_proximity
 from .promo import make_consecutive_promo
 
+# List of categorical features to convert to pandas Categorical dtype after feature generation.
+# Some derived features might not exist in the output Dataframe, 
+# so we check for their presence before conversion.
+CATEGORICAL_FEATURES = ['Promo', 'Promo2', 'SchoolHoliday',
+                        'Assortment', 'StoreType', 'StateHoliday',
+                        'DayOfWeek', 'Quarter', 'Year', 'Month', 'Open',
+                        'is_month_end', 'is_month_start', 'is_weekend']
 
 def make_features(df: pd.DataFrame,
                   lags: int | Iterable[int],
@@ -97,17 +104,13 @@ def make_features(df: pd.DataFrame,
     df = df.merge(merged, on=['Date', 'Store'], how='left')
 
     # Encode categorical features as pandas Categorical dtype
-    cat_cols = ['Promo', 'Promo2', 'SchoolHoliday',
-                'Assortment', 'StoreType', 'StateHoliday',
-                'DayOfWeek', 'Quarter', 'Year', 'Month', 'Open', 'is_month_end', 'is_month_start', 'is_weekend']
-
-    for col in cat_cols:
+    for col in CATEGORICAL_FEATURES:
         if col in df.columns:
             df[col] = pd.Categorical(df[col])
 
-    # Cleanup
+    # Cleanup: drop intermediate columns that are not needed for modeling, but keep 'Store' as a categorical feature.
     df.drop(['Promo2SinceDate', 'CompetitionSinceDate', 'DayOfMonth', 'WeekOfYear', 'Sales'], axis=1, inplace=True)
-    df['Store_id'] = df['Store'].astype('category') # we need it as a feature
+    df['Store_id'] = df['Store'].astype('category')
     df.set_index(['Date', 'Store'], inplace=True)
 
     return df

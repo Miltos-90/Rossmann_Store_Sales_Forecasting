@@ -1,11 +1,7 @@
 
 import logging
-import os
 
-LOG_DIR = "./artifacts"
-LOG_FILE = "hypertuning.log"
-os.makedirs(LOG_DIR, exist_ok=True)
-LOG_FILE = os.path.join(LOG_DIR, LOG_FILE)
+from src.constants import LOG_FILE
 
 logging.basicConfig(
     level=logging.INFO,
@@ -16,5 +12,3 @@ logging.basicConfig(
     ],
     force=True,  # ensure no duplicate handlers if this cell is re-run in a notebookcls
 )
-
-logger = logging.getLogger(__name__)

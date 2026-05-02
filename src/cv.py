@@ -1,16 +1,14 @@
 """Time-series cross-validator for (Date, Store) MultiIndex DataFrames."""
 
-from __future__ import annotations
-
 import logging
 import warnings
 import numpy as np
 import pandas as pd
+
 from typing import Iterator
+from sklearn.model_selection import BaseCrossValidator
 
 logger = logging.getLogger(__name__)
-
-from sklearn.model_selection import BaseCrossValidator
 
 class TimeSeriesCV(BaseCrossValidator):
     """Sliding/expanding-window time-series cross-validator.
