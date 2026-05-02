@@ -133,7 +133,10 @@ def make_objective(
 
         # Fresh callbacks per trial to avoid stale state across hyperopt trials.
         cv_callbacks = [
-            EarlyStoppingCV(rounds=early_stopping_rounds, maximize=False, metric_name=eval_metric, data_name="test"),
+            EarlyStoppingCV(rounds=early_stopping_rounds,
+                            maximize=False,
+                            metric_name=eval_metric,
+                            data_name="test"),
             LogEvalCallback(eval_metric, period=log_period),
         ]
 
