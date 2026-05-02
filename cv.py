@@ -8,10 +8,11 @@ import numpy as np
 import pandas as pd
 from typing import Iterator
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
+from sklearn.model_selection import BaseCrossValidator
 
-class TimeSeriesCV:
+class TimeSeriesCV(BaseCrossValidator):
     """Sliding/expanding-window time-series cross-validator.
 
     Splits are defined on the *Date* level of a ``(Date, Store)`` MultiIndex
@@ -60,7 +61,9 @@ class TimeSeriesCV:
 
     # ------------------------------------------------------------------
     def split(
-        self, X: pd.DataFrame
+        self, X: pd.DataFrame,
+        y: pd.Series | None = None,
+        groups: pd.Series | None = None,
     ) -> Iterator[tuple[np.ndarray, np.ndarray]]:
         """Yield ``(train_indices, test_indices)`` positional index arrays.
 
@@ -118,8 +121,8 @@ class TimeSeriesCV:
 
             self._check_stores(X, train_idx, test_idx, fold)
 
-            log.info(
-                "  Fold %d/%d  train=%d [%s → %s]  test=%d [%s → %s]",
+            logger.debug(
+                "Fold %d/%d  train=%d samples [%s → %s]  test=%d samples [%s → %s]",
                 fold, self.n_splits,
                 len(train_idx), train_start_date.date(), train_end_date.date(),
                 len(test_idx),  test_start_date.date(),  test_end_date.date(),
@@ -154,12 +157,3 @@ class TimeSeriesCV:
                 f"Fold {fold}: stores {missing_test} appear in train but not test.",
                 stacklevel=3,
             )
-
-    # ------------------------------------------------------------------
-    def __repr__(self) -> str:
-        return (
-            f"{self.__class__.__name__}("
-            f"n_splits={self.n_splits}, "
-            f"horizon={self.horizon}, "
-            f"train_size={self.train_size})"
-        )
