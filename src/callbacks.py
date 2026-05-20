@@ -1,7 +1,20 @@
 import xgboost as xgb
 import logging
+from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+
+class BoosterCollector(xgb.callback.TrainingCallback):
+    """Callback that captures the fold boosters from xgb.cv() after training ends."""
+
+    def __init__(self) -> None:
+        self.cvfolds: Optional[list[xgb.Booster]] = None
+
+    def after_training(self, model: xgb.Booster) -> xgb.Booster:
+        if hasattr(model, "cvfolds"):
+            self.cvfolds = [fold.bst for fold in model.cvfolds]
+        return model
 
 class EarlyStoppingCV(xgb.callback.EarlyStopping):
     """EarlyStopping that propagates best_iteration to each fold booster in xgb.cv().

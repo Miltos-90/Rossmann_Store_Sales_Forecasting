@@ -57,7 +57,7 @@ class TimeSeriesCV(BaseCrossValidator):
         self.horizon    = horizon
         self.train_size = train_size
 
-    # ------------------------------------------------------------------
+
     def split(
         self, X: pd.DataFrame,
         y: pd.Series | None = None,
@@ -89,7 +89,6 @@ class TimeSeriesCV(BaseCrossValidator):
                 "Not enough data for training. Reduce n_splits or horizon."
             )
 
-        date_pos = pd.Series(np.arange(n_dates), index=dates)
         date_values   = X.index.get_level_values("Date")
         row_positions = np.arange(len(X))
 
@@ -128,11 +127,11 @@ class TimeSeriesCV(BaseCrossValidator):
 
             yield train_idx, test_idx
 
-    # ------------------------------------------------------------------
+
     def get_n_splits(self) -> int:
         return self.n_splits
 
-    # ------------------------------------------------------------------
+
     def _check_stores(
         self,
         X: pd.DataFrame,

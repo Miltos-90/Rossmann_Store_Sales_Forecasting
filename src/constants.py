@@ -1,7 +1,6 @@
 
 import os
 import numpy as np
-from hyperopt import hp
 from pandas.tseries.offsets import DateOffset
 
 
@@ -11,8 +10,8 @@ STORE_FILE = os.path.join(DATA_DIR, 'store.csv')
 TRAIN_FILE = os.path.join(DATA_DIR, 'train.csv')
 
 LOG_DIR = "./artifacts"
-METRICS_FILE = os.path.join(LOG_DIR, "metrics.csv")
 LOG_FILE = os.path.join(LOG_DIR, "hypertuning.log")
+STORAGE_URL = f"sqlite:///{os.path.join(LOG_DIR, 'hypertuning.db')}"
 
 # Feature engineering settings
 LAGS = [DateOffset(days=1),   DateOffset(days=2),
@@ -32,8 +31,9 @@ N_OUTER_SPLITS    = 2
 OUTER_TRAIN_SIZE = 180  # days
 N_INNER_SPLITS   = 2
 INNER_TRAIN_SIZE = 90   # days
-NUM_TRIALS       = 2
-LOG_PERIOD       = 20   # log CV metrics every LOG_PERIOD boosting rounds
+NUM_TRIALS = 5
+LOG_PERIOD       = 20   # print xgb.cv metrics every LOG_PERIOD boosting rounds
+SEED = 42
 
 XGB_CONSTANTS: dict = {
     "tree_method": "hist",
@@ -42,16 +42,20 @@ XGB_CONSTANTS: dict = {
     "objective": "reg:squarederror",
     "eval_metric": "rmse",
     "verbosity": 0,
-    "early_stopping_rounds": 10,
+}
+EARLY_STOPPING_ROUNDS = 10
+NUM_BOOST_ROUNDS = 1000
+
+
+HYPERPARAMETERS = {
+    "max_depth":        ("suggest_int",   2,    10,   {"log": False}),
+    "learning_rate":    ("suggest_float", 1e-3, 0.3,  {"log": True}),
+    "subsample":        ("suggest_float", 0.5,  1.0,  {"log": False}),
+    "colsample_bytree": ("suggest_float", 0.5,  1.0,  {"log": False}),
+    "min_child_weight": ("suggest_float", 1e-2, 50.0, {"log": True}),
+    "reg_alpha":        ("suggest_float", 1e-8, 10.0, {"log": True}),
+    "reg_lambda":       ("suggest_float", 1e-8, 10.0, {"log": True}),
+    "gamma":            ("suggest_float", 0.0,  10.0, {"log": False}),
 }
 
-SEARCH_SPACE: dict = {
-    "num_boost_round":  hp.choice("num_boost_round",   [100, 200, 300, 500]),
-    "max_depth":        hp.choice("max_depth",         [3, 4, 5, 6, 8]),
-    "eta":              hp.loguniform("eta",           np.log(0.01), np.log(0.3)),
-    "subsample":        hp.uniform("subsample",        0.6, 1.0),
-    "colsample_bytree": hp.uniform("colsample_bytree", 0.5, 1.0),
-    "min_child_weight": hp.choice("min_child_weight",  [1, 3, 5, 10, 20]),
-    "alpha":            hp.loguniform("alpha",         np.log(1e-4), np.log(10.0)),
-    "lambda":           hp.loguniform("lambda",        np.log(1e-4), np.log(10.0)),
-}
+
