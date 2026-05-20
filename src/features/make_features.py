@@ -5,7 +5,6 @@ import numpy as np
 
 from typing import Iterable, Dict
 from functools import reduce
-from pandas.tseries.offsets import DateOffset
 
 from .utils import to_list
 from .lags import make_lags
