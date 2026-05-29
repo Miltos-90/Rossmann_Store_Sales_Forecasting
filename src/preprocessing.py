@@ -71,3 +71,36 @@ def process_store_data(df: pd.DataFrame) -> pd.DataFrame:
     df.loc[date_outliers, 'CompetitionSinceDate'] = pd.NaT
 
     return df
+
+
+def drop_closed(X: pd.DataFrame, y: pd.Series) -> tuple[pd.DataFrame, pd.Series]:
+    """ Drop samples where store is closed (Open == 0) since they have no sales and would only add noise to the model
+    Args:
+        X (pd.DataFrame): Feature dataframe containing 'Open' column
+        y (pd.Series): Target series aligned with X
+
+    Returns:
+        tuple[pd.DataFrame, pd.Series]: Filtered X and y with closed store samples removed
+    
+    """
+        
+    # Remove samples where store is closed (Open == 0) since they have no sales and would only add noise to the model
+    is_open = X['Open'] != 0
+    X = X[is_open].drop(['Open'], axis=1)
+    y = y[is_open]
+
+    return X, y
+
+def drop_null_targets(X: pd.DataFrame, y: pd.Series) -> tuple[pd.DataFrame, pd.Series]:
+    """ 
+    Drop samples with null target values since they cannot be used for training or evaluation.
+    
+    Args:
+        X (pd.DataFrame): Feature dataframe
+        y (pd.Series): Target series aligned with X
+
+    Returns:
+        tuple[pd.DataFrame, pd.Series]: Filtered X and y with null target samples removed
+    """
+    non_null_targets = ~y.isnull().any(axis=1)
+    return X[non_null_targets], y[non_null_targets]

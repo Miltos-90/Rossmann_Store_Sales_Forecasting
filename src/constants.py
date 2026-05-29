@@ -26,15 +26,18 @@ ROLL_WINDOWS = { 7: [DateOffset(days=1), DateOffset(weeks=1)],
                 30: [DateOffset(months=1), DateOffset(months=3), DateOffset(months=6)]}
 
 # Training settings
-FORECAST_HORIZON = 42 # -> 6 weeks * 7 days/week
-N_OUTER_SPLITS    = 2
-OUTER_TRAIN_SIZE = 180  # days
-N_INNER_SPLITS   = 2
-INNER_TRAIN_SIZE = 90   # days
-NUM_TRIALS = 5
-LOG_PERIOD       = 20   # print xgb.cv metrics every LOG_PERIOD boosting rounds
-SEED = 42
-
+FORECAST_HORIZON        = 42 # # of days to predict
+N_OUTER_SPLITS          = 6 # number of outer CV splits
+OUTER_TRAIN_SIZE        = 650 # # of days in the training portion of each outer CV split
+N_INNER_SPLITS          = 4 # number of inner CV splits for hyperparameter tuning
+INNER_TRAIN_SIZE        = 180   # # of days in the training portion of each inner CV split 
+NUM_TRIALS              = 50 # number of Optuna trials for hyperparameter tuning in each outer CV split
+SEED                    = 42 # random seed for reproducibility
+MONITOR_PERIODS         = 100 # number of CV rounds to report in pruning callback
+NUM_STARTUP_TRIALS      = 5 # Pruning is disabled until the given number of trials finish in the same study. After that, pruning is enabled for all subsequent trials.
+NUM_JOBS                = 4 # number of parallel jobs for Optuna.  Set to -1 to use all available cores.
+EARLY_STOPPING_ROUNDS   = 10 # Number of rounds with no improvement after which training will be stopped.  Set to None to disable early stopping.
+NUM_BOOST_ROUNDS        = 10000 # Maximum number of boosting rounds to train.  Early stopping may cause training to stop before this number is reached.
 XGB_CONSTANTS: dict = {
     "tree_method": "hist",
     "device": "cpu",
@@ -43,9 +46,6 @@ XGB_CONSTANTS: dict = {
     "eval_metric": "rmse",
     "verbosity": 0,
 }
-EARLY_STOPPING_ROUNDS = 10
-NUM_BOOST_ROUNDS = 1000
-
 
 HYPERPARAMETERS = {
     "max_depth":        ("suggest_int",   2,    10,   {"log": False}),

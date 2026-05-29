@@ -1,8 +1,6 @@
 """ Shared low-level helpers used across feature sub-modules. """
 
 import pandas as pd
-
-from typing import Iterable
 from pandas.tseries.offsets import DateOffset
 
 

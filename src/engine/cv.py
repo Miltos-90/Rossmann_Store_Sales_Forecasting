@@ -47,6 +47,7 @@ class TimeSeriesCV(BaseCrossValidator):
         horizon: int,
         train_size: int | None = None,
     ) -> None:
+        """ Initialize the cross-validator. """
         if n_splits < 1:
             raise ValueError(f"n_splits must be >= 1, got {n_splits}")
         if horizon < 1:
@@ -116,7 +117,7 @@ class TimeSeriesCV(BaseCrossValidator):
             train_idx = row_positions[train_mask]
             test_idx  = row_positions[test_mask]
 
-            self._check_stores(X, train_idx, test_idx, fold)
+            # self._check_stores(X, train_idx, test_idx, fold)
 
             logger.debug(
                 "Fold %d/%d  train=%d samples [%s → %s]  test=%d samples [%s → %s]",
@@ -144,13 +145,16 @@ class TimeSeriesCV(BaseCrossValidator):
         test_stores   = set(X.iloc[test_idx].index.get_level_values("Store"))
         missing_train = test_stores - train_stores
         missing_test  = train_stores - test_stores
+        n_train_stores = len(train_stores)
         if missing_train:
             warnings.warn(
-                f"Fold {fold}: stores {missing_train} appear in test but not train.",
+                f"Fold {fold}: {len(missing_train)} store(s) appear in test but not train.",
                 stacklevel=3,
             )
         if missing_test:
+            pct = 100 * len(missing_test) / n_train_stores
             warnings.warn(
-                f"Fold {fold}: stores {missing_test} appear in train but not test.",
+                f"Fold {fold}: {len(missing_test)} store(s) ({pct:.1f}%) appear in train "
+                f"but not test — likely closed for the entire test window.",
                 stacklevel=3,
             )
