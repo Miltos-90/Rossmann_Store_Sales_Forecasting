@@ -73,14 +73,14 @@ def process_store_data(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def drop_closed(X: pd.DataFrame, y: pd.Series) -> tuple[pd.DataFrame, pd.Series]:
+def drop_closed(X: pd.DataFrame, y: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     """ Drop samples where store is closed (Open == 0) since they have no sales and would only add noise to the model
     Args:
         X (pd.DataFrame): Feature dataframe containing 'Open' column
-        y (pd.Series): Target series aligned with X
+        y (pd.DataFrame): Target dataframe aligned with X
 
     Returns:
-        tuple[pd.DataFrame, pd.Series]: Filtered X and y with closed store samples removed
+        tuple[pd.DataFrame, pd.DataFrame]: Filtered X and y with closed store samples removed
     
     """
         
@@ -91,7 +91,7 @@ def drop_closed(X: pd.DataFrame, y: pd.Series) -> tuple[pd.DataFrame, pd.Series]
 
     return X, y
 
-def drop_null_targets(X: pd.DataFrame, y: pd.Series) -> tuple[pd.DataFrame, pd.Series]:
+def drop_null_targets(X: pd.DataFrame, y: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     """ 
     Drop samples with null target values since they cannot be used for training or evaluation.
     

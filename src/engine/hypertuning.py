@@ -224,12 +224,12 @@ def _objective(
                           boosters=booster_collector.cvfolds,
                           log_dir=study_config["log_dir"])
 
-    return history[f"test-{metric}-mean"].values[-1]
+    return history[f"test-{metric}-mean"].min()
 
 
 def nested_cv(
         X: pd.DataFrame,
-        y: pd.Series,
+        y: pd.DataFrame,
         cv_config: dict,
         study_config: dict,
 ) -> None:
