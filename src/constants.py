@@ -34,7 +34,11 @@ INNER_TRAIN_SIZE = 90   # days
 NUM_TRIALS = 5
 LOG_PERIOD       = 20   # print xgb.cv metrics every LOG_PERIOD boosting rounds
 SEED = 42
+MONITOR_PERIODS = 100 # number of CV rounds to report in pruning callback (must be <= LOG_PERIOD)
+NUM_STARTUP_TRIALS = 5 # Pruning is disabled until the given number of trials finish in the same study. After that, pruning is enabled for all subsequent trials.
 
+EARLY_STOPPING_ROUNDS = 10
+NUM_BOOST_ROUNDS = 1000
 XGB_CONSTANTS: dict = {
     "tree_method": "hist",
     "device": "cpu",
@@ -43,8 +47,6 @@ XGB_CONSTANTS: dict = {
     "eval_metric": "rmse",
     "verbosity": 0,
 }
-EARLY_STOPPING_ROUNDS = 10
-NUM_BOOST_ROUNDS = 1000
 
 
 HYPERPARAMETERS = {

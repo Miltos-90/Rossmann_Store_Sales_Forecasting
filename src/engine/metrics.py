@@ -40,9 +40,20 @@ def _metrics_1d(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
 
     return {"MAE": mae, "RMSE": rmse, "MAPE": mape, "RMSPE": rmspe, "R2": r2}
 
-def metrics(y_true: np.ndarray, y_pred: np.ndarray) -> pd.DataFrame:
+def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> pd.DataFrame:
     """
     Compute forecasting metrics per horizon step + overall.
+    Parameters
+    ----------
+    y_true : np.ndarray
+        2D array of true values with shape (n_samples, n_steps).
+    y_pred : np.ndarray
+        2D array of predicted values with shape (n_samples, n_steps).
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame containing metrics for each step and overall average.
     """
     y_true = np.asarray(y_true, float)
     y_pred = np.asarray(y_pred, float)

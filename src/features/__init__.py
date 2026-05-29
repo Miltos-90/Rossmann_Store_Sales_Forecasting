@@ -111,7 +111,7 @@ Sub-modules
 """
 
 from .promo import attach_store_data
-from .lags import make_targets
 from .make_features import make_features
+from .make_targets import make_targets
 
 __all__ = ['make_features', 'make_targets', 'attach_store_data']

@@ -47,6 +47,7 @@ class TimeSeriesCV(BaseCrossValidator):
         horizon: int,
         train_size: int | None = None,
     ) -> None:
+        """ Initialize the cross-validator. """
         if n_splits < 1:
             raise ValueError(f"n_splits must be >= 1, got {n_splits}")
         if horizon < 1:
