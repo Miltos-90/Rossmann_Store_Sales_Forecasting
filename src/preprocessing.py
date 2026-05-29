@@ -90,3 +90,17 @@ def drop_closed(X: pd.DataFrame, y: pd.Series) -> tuple[pd.DataFrame, pd.Series]
     y = y[is_open]
 
     return X, y
+
+def drop_null_targets(X: pd.DataFrame, y: pd.Series) -> tuple[pd.DataFrame, pd.Series]:
+    """ 
+    Drop samples with null target values since they cannot be used for training or evaluation.
+    
+    Args:
+        X (pd.DataFrame): Feature dataframe
+        y (pd.Series): Target series aligned with X
+
+    Returns:
+        tuple[pd.DataFrame, pd.Series]: Filtered X and y with null target samples removed
+    """
+    non_null_targets = ~y.isnull().any(axis=1)
+    return X[non_null_targets], y[non_null_targets]

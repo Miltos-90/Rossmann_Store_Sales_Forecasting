@@ -7,8 +7,6 @@ import numpy as np
 import pandas as pd
 import xgboost as xgb
 
-import src.constants as C
-
 from typing import Any
 from sklearn.model_selection import BaseCrossValidator
 from optuna.study import Study
@@ -30,6 +28,7 @@ def _save_trial_artifacts(
     trial: Trial,
     history: pd.DataFrame,
     boosters: list[xgb.Booster] | None,
+    log_dir: str,
 ) -> None:
     """Persist CV history and fold boosters to disk, keyed by study/trial.
 
@@ -38,8 +37,9 @@ def _save_trial_artifacts(
         trial: Optuna trial object to store artifact metadata.
         history: DataFrame containing cross-validation history from xgb.cv().
         boosters: List of trained XGBoost booster objects (one per fold), or None.
+        log_dir: Root directory for artifact storage.
     """
-    trial_dir = os.path.join(C.LOG_DIR, study_name, f"trial_{trial.number:04d}")
+    trial_dir = os.path.join(log_dir, study_name, f"trial_{trial.number:04d}")
     os.makedirs(trial_dir, exist_ok=True)
 
     # Save full CV history
@@ -146,20 +146,23 @@ def _log_trial_cv_results(
     )
 
 
-def _suggest_params(trial: Trial) -> dict[str, Any]:
+def _suggest_params(trial: Trial, hyperparameters: dict) -> dict[str, Any]:
     """Suggest hyperparameters for a trial using Optuna's sampling methods.
 
-    Dynamically builds a hyperparameter dictionary based on the HYPERPARAMETERS
-    configuration, using the appropriate Optuna suggest method for each parameter.
+    Dynamically builds a hyperparameter dictionary based on the provided
+    hyperparameters configuration, using the appropriate Optuna suggest method
+    for each parameter.
 
     Args:
         trial: Active Optuna trial.
+        hyperparameters: Search space definition mapping parameter names to
+            (method, low, high, kwargs) tuples.
 
     Returns:
         Dictionary mapping hyperparameter names to suggested values.
     """
     params = {}
-    for name, (method, low, high, kwargs) in C.HYPERPARAMETERS.items():
+    for name, (method, low, high, kwargs) in hyperparameters.items():
         suggest_fn = getattr(trial, method)
         params[name] = suggest_fn(name, low, high, **kwargs)
     return params
@@ -170,12 +173,8 @@ def _objective(
     X: np.ndarray,
     y: np.ndarray,
     cv: BaseCrossValidator,
-    study_name: str = "",
-    metric: str = C.XGB_CONSTANTS["eval_metric"],
-    early_stopping_rounds: int = C.EARLY_STOPPING_ROUNDS,
-    boosting_rounds: int = C.NUM_BOOST_ROUNDS,
-    monitor_periods: int = C.MONITOR_PERIODS,
-    xgboost_constants: dict = C.XGB_CONSTANTS,
+    study_name: str,
+    study_config: dict,
 ) -> float:
     """Optuna objective for broad search over the full hyperparameter space.
 
@@ -190,68 +189,80 @@ def _objective(
         y: Target vector (n_samples,).
         cv: Time-series cross-validation splitter.
         study_name: Name of the Optuna study, used for organizing artifacts.
-        metric: Evaluation metric name to monitor (e.g., "mae").
-        early_stopping_rounds: Number of rounds with no improvement to trigger early stopping.
-        boosting_rounds: Maximum number of boosting rounds to train.
-        monitor_periods: Number of CV rounds to report in pruning callback (must be <= LOG_PERIOD).
-        xgboost_constants: Base XGBoost parameters to include in every trial.
+        study_config: Optuna study settings (see nested_cv for key descriptions).
 
     Returns:
         Mean CV metric value (MAE or configured eval_metric) from the final boosting round.
     """
-    # Dynamically build the params dict based on the HYPERPARAMETERS configuration
-
-
-    params = _suggest_params(trial)
+    metric = study_config["xgb_constants"]["eval_metric"]
+    params = _suggest_params(trial, study_config["hyperparameters"])
 
     # Run CV and pruning in a single call to XGBoost's cv function
     booster_collector = BoosterCollector()
     callbacks = [
-        xgb.callback.EvaluationMonitor(show_stdv=True, period=monitor_periods),
-        xgb.callback.EarlyStopping(rounds=early_stopping_rounds),
-        XGBoostPruningCallback(trial, observation_key=f"test-{metric}"), 
+        xgb.callback.EvaluationMonitor(show_stdv=True, period=study_config["monitor_periods"]),
+        xgb.callback.EarlyStopping(rounds=study_config["early_stopping_rounds"]),
+        XGBoostPruningCallback(trial, observation_key=f"test-{metric}"),
         # The observation_key in the pruning callback reads from XGBoost's internal evals_log
         # dict (keyed as "test-<metric>") - not from the final DataFrame column names ("test-<metric>-mean").
         booster_collector,
     ]
 
-    history = xgb.cv(params={**xgboost_constants, **params},
+    history = xgb.cv(params={**study_config["xgb_constants"], **params},
                      dtrain=xgb.DMatrix(X, label=y, enable_categorical=True),
-                     num_boost_round=boosting_rounds,
-                     folds = list(cv.split(X)),
+                     num_boost_round=study_config["num_boost_rounds"],
+                     folds=list(cv.split(X)),
                      metrics=[metric],
                      callbacks=callbacks,
-                     seed=C.SEED)
+                     seed=study_config["seed"])
 
     _log_trial_cv_results(trial=trial, metric=metric, history=history)
 
     _save_trial_artifacts(study_name=study_name,
                           trial=trial,
                           history=history,
-                          boosters=booster_collector.cvfolds)
+                          boosters=booster_collector.cvfolds,
+                          log_dir=study_config["log_dir"])
 
     return history[f"test-{metric}-mean"].values[-1]
 
 
 def nested_cv(
-        X: pd.DataFrame, 
-        y: pd.Series) -> None:
+        X: pd.DataFrame,
+        y: pd.Series,
+        cv_config: dict,
+        study_config: dict,
+) -> None:
     """
     Perform nested cross-validation with Optuna hyperparameter tuning and XGBoost.
-    The outer loop uses TimeSeriesCV to create train/test splits, and the inner loop performs hyperparameter tuning with another TimeSeriesCV for each trial.
+    The outer loop uses TimeSeriesCV to create train/test splits, and the inner loop performs
+    hyperparameter tuning with another TimeSeriesCV for each trial.
     Results and artifacts are logged to disk and the Optuna database for later analysis.
 
     Args:
         X: Feature matrix (n_samples, n_features).
         y: Target vector (n_samples,).
+        cv_config: Cross-validation settings with keys:
+            - n_outer_splits: Number of outer CV folds.
+            - n_inner_splits: Number of inner CV folds for hyperparameter tuning.
+            - forecast_horizon: Number of days to forecast.
+            - outer_train_size: Training window size (days) for outer CV.
+            - inner_train_size: Training window size (days) for inner CV.
+        study_config: Optuna study settings with keys:
+            - storage_url: Optuna storage URL.
+            - n_trials: Number of Optuna trials per outer fold.
+            - n_startup_trials: Trials before pruning is enabled.
+            - n_jobs: Parallel jobs for Optuna.
+            - seed: Random seed for reproducibility.
+            - xgb_constants: Base XGBoost parameters for all trials and final training.
 
     Returns:
         None (results are logged to disk and Optuna DB).
     """
 
-    cv = TimeSeriesCV(n_splits=C.N_OUTER_SPLITS,
-                      horizon=C.FORECAST_HORIZON,
-                      train_size=C.OUTER_TRAIN_SIZE)
+    cv = TimeSeriesCV(n_splits=cv_config["n_outer_splits"],
+                      horizon=cv_config["forecast_horizon"],
+                      train_size=cv_config["outer_train_size"])
 
     for fold, (outer_train_idx, outer_test_idx) in enumerate(cv.split(X), start=1):
         study_name = f"study_fold_{fold}"
@@ -259,31 +270,36 @@ def nested_cv(
         Xv, yv = X.iloc[outer_test_idx],  y.iloc[outer_test_idx]
         train_dm = xgb.DMatrix(Xt, yt, enable_categorical=True)
         test_dm  = xgb.DMatrix(Xv, enable_categorical=True)
-        logger.info(f"Outer fold {fold}/{C.N_OUTER_SPLITS}  (train={len(Xt)} samples, test={len(Xv)} samples)")
+        logger.info(f"Outer fold {fold}/{cv_config['n_outer_splits']}  (train={len(Xt)} samples, test={len(Xv)} samples)")
 
-        logger.info(f"Running hyperparameter tuning ({C.NUM_TRIALS} trials, {C.N_INNER_SPLITS} inner folds)...")
-        inner_cv = TimeSeriesCV(n_splits=C.N_INNER_SPLITS,
-                                horizon=C.FORECAST_HORIZON,
-                                train_size=C.INNER_TRAIN_SIZE)
-        obj_fcn = lambda trial: _objective(trial, Xt, yt, inner_cv, study_name=study_name)
+        logger.info(f"Running hyperparameter tuning ({study_config['n_trials']} trials, {cv_config['n_inner_splits']} inner folds)...")
+        inner_cv = TimeSeriesCV(n_splits=cv_config["n_inner_splits"],
+                                horizon=cv_config["forecast_horizon"],
+                                train_size=cv_config["inner_train_size"])
+
+        obj_fcn = lambda trial: _objective(
+            trial, Xt, yt, inner_cv,
+            study_name=study_name,
+            study_config=study_config,
+        )
         study   = optuna.create_study(study_name=study_name,
-                                    storage=C.STORAGE_URL,
+                                    storage=study_config["storage_url"],
                                     load_if_exists=True,
                                     direction="minimize",
-                                    pruner=MedianPruner(n_startup_trials=C.NUM_STARTUP_TRIALS),
-                                    sampler=TPESampler(seed=C.SEED))
-        study.optimize(obj_fcn, n_trials=C.NUM_TRIALS, n_jobs=-1)
+                                    pruner=MedianPruner(n_startup_trials=study_config["n_startup_trials"]),
+                                    sampler=TPESampler(seed=study_config["seed"]))
+        study.optimize(obj_fcn, n_trials=study_config["n_trials"], n_jobs=study_config["n_jobs"])
         _log_study(study)
 
         logger.info(f"Training final model on outer fold {fold} with the best hyperparameters...")
-        final_booster = xgb.train(params={**C.XGB_CONSTANTS, **study.best_trial.params},
+        final_booster = xgb.train(params={**study_config["xgb_constants"], **study.best_trial.params},
                                 num_boost_round=study.best_trial.user_attrs["best_n_rounds"],
                                 dtrain=train_dm)
 
         logger.info(f"Evaluating final model on outer fold {fold} test set...")
         preds = final_booster.predict(test_dm)
         metrics = compute_metrics(yv.values, preds)
-        metrics_filename = os.path.join(C.LOG_DIR, study_name, f"test_set_metrics_fold_{fold}.csv")
+        metrics_filename = os.path.join(study_config["log_dir"], study_name, f"test_set_metrics_fold_{fold}.csv")
         metrics.to_csv(metrics_filename)
 
     logger.info("Nested cross-validation complete. All results logged.")

@@ -1,5 +1,6 @@
 """ First-order difference features (absolute and relative change over a lag period). """
 
+import numpy as np
 import pandas as pd
 
 from typing import Iterable
@@ -42,7 +43,10 @@ def make_differences(df: pd.DataFrame,
         prior_index = df_p.index - offset
         df_p_prior = df_p.reindex(prior_index)
         df_p_prior.index = df_p.index
-        feature_dfs.append(melt(df_p - df_p_prior,                   f"lag_1_{d_name}_diff"))
-        feature_dfs.append(melt((df_p - df_p_prior).div(df_p_prior), f"lag_1_{d_name}_pct_change"))
+        pct = ((df_p - df_p_prior)
+               .div(df_p_prior)
+               .replace([np.inf, -np.inf], np.nan)) # Handle division by zero
+        feature_dfs.append(melt(df_p - df_p_prior, f"lag_1_{d_name}_diff"))
+        feature_dfs.append(melt(pct,               f"lag_1_{d_name}_pct_change"))
 
     return align(df, feature_dfs)
