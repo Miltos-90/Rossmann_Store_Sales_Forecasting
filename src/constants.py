@@ -38,6 +38,7 @@ NUM_STARTUP_TRIALS      = 5 # Pruning is disabled until the given number of tria
 NUM_JOBS                = 4 # number of parallel jobs for Optuna.  Set to -1 to use all available cores.
 EARLY_STOPPING_ROUNDS   = 10 # Number of rounds with no improvement after which training will be stopped.  Set to None to disable early stopping.
 NUM_BOOST_ROUNDS        = 10000 # Maximum number of boosting rounds to train.  Early stopping may cause training to stop before this number is reached.
+REFIT_VAL_FRACTION      = 0.1 # Fraction of the training data to set aside for early stopping when refitting the final model with the best hyperparameters on the entire outer fold training set.
 XGB_CONSTANTS: dict = {
     "tree_method": "hist",
     "device": "cpu",

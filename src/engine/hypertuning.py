@@ -166,28 +166,49 @@ def refit(
     X_train: pd.DataFrame,
     y_train: pd.Series,
     best_trial: optuna.trial.FrozenTrial,
-    model_config: dict[str, Any],
-    seed: int
+    config: dict[str, Any],
+    val_fraction: float,
 ) -> xgb.Booster:
     """ 
     Refit XGBoost model on the entire outer fold training set using the best hyperparameters found in the inner loop.
+
+    A temporal validation split (last val_fraction of the training rows) is used
+    with early stopping so that the optimal boosting rounds re-calibrate to the
+    larger outer-fold dataset rather than being fixed at the inner-CV value.
 
     Args:
         X_train: Training features for the outer fold.
         y_train: Training targets for the outer fold.
         best_trial: Optuna trial object containing the best hyperparameters from the inner loop.
-        model_config: Dictionary containing any constant hyperparameters for the XGBoost model.
-        seed: Random seed for reproducibility.
+        config: Dictionary containing either the flat XGBoost constants dict directly,
+            or a study config dict with an "xgb_constants" key.
+        val_fraction: Fraction of X_train (taken from the end, preserving temporal order)
+            to use as a validation set for early stopping.
 
     Returns:
         Trained XGBoost booster fitted on the entire outer fold training set with the best hyperparameters.
     """
-    params = {**model_config, **best_trial.params}
-    num_boost_round = best_trial.user_attrs["best_n_rounds"]
-    train_dmatrix = xgb.DMatrix(X_train, label=y_train, enable_categorical=True)
-    booster = xgb.train(params=params,
-                        num_boost_round=num_boost_round,
-                        dtrain=train_dmatrix)
+    xgb_constants = config["xgb_constants"]
+    num_boost_round = config.get("num_boost_rounds")
+    early_stopping_rounds = config["early_stopping_rounds"]
+    params = {**xgb_constants, **best_trial.params}
+    
+    # Temporal validation split for early stopping
+    n_val = max(1, int(len(X_train) * val_fraction))
+    X_tr, X_val = X_train.iloc[:-n_val], X_train.iloc[-n_val:]
+    y_tr, y_val = y_train.iloc[:-n_val], y_train.iloc[-n_val:]
+
+    dtrain_sub = xgb.DMatrix(X_tr,  label=y_tr,  enable_categorical=True)
+    dval       = xgb.DMatrix(X_val, label=y_val, enable_categorical=True)
+
+    # Phase 1: find optimal round count via early stopping on the held-out val set
+    booster = xgb.train(
+        params=params,
+        num_boost_round=num_boost_round,
+        dtrain=dtrain_sub,
+        evals=[(dval, "val")],
+        callbacks=[xgb.callback.EarlyStopping(rounds=early_stopping_rounds)],
+    )
 
     return booster
 
