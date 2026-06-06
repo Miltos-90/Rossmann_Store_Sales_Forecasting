@@ -94,6 +94,8 @@ def _objective(
                      folds=folds,
                      metrics=[metric],
                      callbacks=callbacks,
+                     verbose_eval=False,
+                     verbose=False,
                      seed=study_config["seed"])
 
     utils.log_trial_cv_results(trial=trial, metric=metric, history=history)
@@ -208,6 +210,7 @@ def refit(
         dtrain=dtrain_sub,
         evals=[(dval, "val")],
         callbacks=[xgb.callback.EarlyStopping(rounds=early_stopping_rounds)],
+        verbose_eval=False,
     )
 
     return booster
