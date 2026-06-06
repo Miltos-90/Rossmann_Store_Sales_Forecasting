@@ -6,18 +6,16 @@ import optuna
 import numpy as np
 import pandas as pd
 import xgboost as xgb
-import matplotlib.pyplot as plt
 
 from typing import Any
 from sklearn.model_selection import BaseCrossValidator
-from optuna.trial import Trial
+from optuna.trial import Trial, TrialState
 from optuna.pruners import MedianPruner
 from optuna.samplers import TPESampler
 from optuna_integration.xgboost import XGBoostPruningCallback
 
 from .callbacks import BoosterCollector
 from .cv import TimeSeriesCV
-from .metrics import metrics_2d
 from . import utils
 
 
@@ -109,111 +107,128 @@ def _objective(
     return history[f"test-{metric}-mean"].min()
 
 
-def nested_cv(
-        X: pd.DataFrame,
-        y: pd.DataFrame,
-        cv_config: dict,
-        study_config: dict,
-) -> None:
+def _wide_to_long_predictions(s: pd.DataFrame) -> pd.Series:
+    """ Convert wide-format predictions with MultiIndex (Date, Store) and columns for each day ahead
+        to long-format predictions with MultiIndex (Date, Store, Forecast Date) and a single value column.
+
+        Args:
+            s: DataFrame with MultiIndex (Date, Store) and columns for each day ahead
+
+        Returns:
+            Series with MultiIndex (Date, Store, Forecast Date) and values containing the predictions.
     """
-    Perform nested cross-validation with Optuna hyperparameter tuning and XGBoost.
-    The outer loop uses TimeSeriesCV to create train/test splits, and the inner loop performs
-    hyperparameter tuning with another TimeSeriesCV for each trial.
-    Results and artifacts are logged to disk and the Optuna database for later analysis.
+
+    # Reset index to make Date and Store regular columns
+    s_long = s.reset_index()
+
+    # Melt from wide to long format
+    s_long = s_long.melt(id_vars=["Date", "Store"],
+                         var_name="lead_column",
+                         value_name="value")
+
+    # Extract days ahead from column name (e.g., "lead_1_days" -> 1)
+    s_long['days_ahead'] = (s_long['lead_column'].astype(int) + 1)
+
+    # Calculate forecast date by adding days to the base Date
+    s_long['Forecast Date'] = s_long['Date'] + pd.to_timedelta(s_long['days_ahead'], unit='D')
+
+    # Create the final long-format dataframe with MultiIndex (Date, Store, Forecast Date)
+    s_long = (s_long
+              .set_index(['Date', 'Store', 'Forecast Date'])
+              .drop(['lead_column', 'days_ahead'], axis=1)
+              ['value']  # Implicitly convert to Series
+              .sort_index())
+
+    return s_long
+
+
+def predict(booster: xgb.Booster, X_test: pd.DataFrame) -> pd.Series:
+    """ 
+    Generate predictions for the given test data using the provided XGBoost booster.
 
     Args:
-        X: Feature matrix (n_samples, n_features).
-        y: Target vector (n_samples,).
-        cv_config: Cross-validation settings with keys:
-            - n_outer_splits: Number of outer CV folds.
-            - n_inner_splits: Number of inner CV folds for hyperparameter tuning.
-            - forecast_horizon: Number of days to forecast.
-            - outer_train_size: Training window size (days) for outer CV.
-            - inner_train_size: Training window size (days) for inner CV.
-        study_config: Optuna study settings with keys:
-            - storage_url: Optuna storage URL.
-            - n_trials: Number of Optuna trials per outer fold.
-            - n_startup_trials: Trials before pruning is enabled.
-            - n_jobs: Parallel jobs for Optuna.
-            - seed: Random seed for reproducibility.
-            - xgb_constants: Base XGBoost parameters for all trials and final training.
+        booster: Trained XGBoost booster.
+        X_test: Test features.
 
     Returns:
-        None (results are logged to disk and Optuna DB).
+        Series with predictions.
+    """
+    test_dmatrix  = xgb.DMatrix(X_test, enable_categorical=True)
+    log_preds_raw = booster.predict(test_dmatrix)
+    log_preds = pd.DataFrame(data=log_preds_raw, index=X_test.index)
+    preds_long = _wide_to_long_predictions(log_preds)
+    preds = utils.overwrite_closed_sales(preds_long, mode='zero', index_name="Forecast Date")
+    preds = preds.apply(np.expm1)
+
+    return preds
+
+def refit(
+    X_train: pd.DataFrame,
+    y_train: pd.Series,
+    best_trial: optuna.trial.FrozenTrial,
+    model_config: dict[str, Any],
+    seed: int
+) -> xgb.Booster:
+    """ 
+    Refit XGBoost model on the entire outer fold training set using the best hyperparameters found in the inner loop.
+
+    Args:
+        X_train: Training features for the outer fold.
+        y_train: Training targets for the outer fold.
+        best_trial: Optuna trial object containing the best hyperparameters from the inner loop.
+        model_config: Dictionary containing any constant hyperparameters for the XGBoost model.
+        seed: Random seed for reproducibility.
+
+    Returns:
+        Trained XGBoost booster fitted on the entire outer fold training set with the best hyperparameters.
+    """
+    params = {**model_config, **best_trial.params}
+    num_boost_round = best_trial.user_attrs["best_n_rounds"]
+    train_dmatrix = xgb.DMatrix(X_train, label=y_train, enable_categorical=True)
+    booster = xgb.train(params=params,
+                        num_boost_round=num_boost_round,
+                        dtrain=train_dmatrix)
+
+    return booster
+
+
+def optimize(study_name: str, X_train: pd.DataFrame, y_train: pd.Series, config: dict) -> None:
+    """ 
+    Optimize hyperparameters using Optuna with nested cross-validation.
+
+    Args:
+        study_name (str): Name of the Optuna study.
+        X_train (pd.DataFrame): Training features.
+        y_train (pd.Series): Training targets.
+        config (dict): Configuration dictionary for the study.
+
+    Returns:
+        None
     """
 
-    y_log = y.apply(np.log1p)
+    inner_cv = TimeSeriesCV(n_splits=config["n_inner_splits"],
+                            horizon=config["forecast_horizon"],
+                            train_size=config["inner_train_size"])
+    
+    pruner = MedianPruner(n_startup_trials=config["n_startup_trials"])
 
-    cv = TimeSeriesCV(n_splits=cv_config["n_outer_splits"],
-                      horizon=cv_config["forecast_horizon"],
-                      train_size=cv_config["outer_train_size"])
+    sampler = TPESampler(seed=config["seed"])
 
-    for fold, (outer_train_idx, outer_test_idx) in enumerate(cv.split(X), start=1):
-        logger.info(f"Outer fold {fold}/{cv_config['n_outer_splits']} starting...")
+    obj_fcn = lambda trial: _objective(trial, X_train, y_train, inner_cv,
+                                       study_name=study_name,
+                                       study_config=config)
 
-        # Make fold-specific artifact paths for boosters and metrics
-        logger.info(f"Setting up artifact paths for fold {fold}...")
-        study_name = f"study_fold_{fold}"
-        artifact_dir = os.path.join(study_config["log_dir"], study_name)
-        booster_filename = os.path.join(artifact_dir, f"booster_fold_{fold}.model")
-        metrics_filename = os.path.join(artifact_dir, f"test_set_metrics_fold_{fold}.csv")
-        predictions_filename = os.path.join(artifact_dir, f"predicted_sales_fold_{fold}.csv")
-        actual_filename = os.path.join(artifact_dir, f"actual_sales_fold_{fold}.csv")
-        os.makedirs(artifact_dir, exist_ok=True)
+    study = optuna.create_study(study_name=study_name,
+                                storage=config["storage_url"],
+                                load_if_exists=True,
+                                direction="minimize",
+                                pruner=pruner,
+                                sampler=sampler)
 
-        # Prepare fold-specific datamatrices
-        Xt, ylog_t = X.iloc[outer_train_idx], y_log.iloc[outer_train_idx]
-        Xv, ylog_v = X.iloc[outer_test_idx],  y_log.iloc[outer_test_idx]
-        train_dm = xgb.DMatrix(Xt, ylog_t, enable_categorical=True)
-        test_dm  = xgb.DMatrix(Xv, enable_categorical=True)
-        logger.info(f"Outer fold {fold} | Train samples: {len(Xt)}, Test samples: {len(Xv)}")
+    finished_trials = study.get_trials(deepcopy=False, states=[TrialState.PRUNED, TrialState.COMPLETE])
+    remaining_trials = config["n_trials"] - len(finished_trials)
 
-        # Run Optuna hyperparameter tuning with nested CV in the inner loop
-        logger.info(f"Running hyperparameter tuning ({study_config['n_trials']} trials," 
-                    f" {cv_config['n_inner_splits']} inner folds)...")
-        inner_cv = TimeSeriesCV(n_splits=cv_config["n_inner_splits"],
-                                horizon=cv_config["forecast_horizon"],
-                                train_size=cv_config["inner_train_size"])
-        pruner = MedianPruner(n_startup_trials=study_config["n_startup_trials"])
-        sampler = TPESampler(seed=study_config["seed"])
-        obj_fcn = lambda trial: _objective(
-            trial, Xt, ylog_t, inner_cv,
-            study_name=study_name,
-            study_config=study_config,
-        )
-        study = optuna.create_study(study_name=study_name,
-                                    storage=study_config["storage_url"],
-                                    load_if_exists=True,
-                                    direction="minimize",
-                                    pruner=pruner,
-                                    sampler=sampler)
-        study.optimize(obj_fcn, n_trials=study_config["n_trials"], n_jobs=study_config["n_jobs"])
-        utils.log_study(study)
+    study.optimize(obj_fcn, n_trials=remaining_trials, n_jobs=config["n_jobs"])
+    utils.log_study(study)
 
-        # Train final model on the entire outer fold training set with the best hyperparameters
-        logger.info(f"Training final model on outer fold {fold} with the best hyperparameters...")
-        params ={**study_config["xgb_constants"], **study.best_trial.params}
-        num_boost_round = study.best_trial.user_attrs["best_n_rounds"]
-        booster = xgb.train(params=params, num_boost_round=num_boost_round, dtrain=train_dm)
-
-        # Evaluate final model on the outer fold test set and log metrics
-        logger.info(f"Evaluating final model on outer fold {fold} test set...")
-        preds = booster.predict(test_dm)
-        is_closed = Xv['Open'] == 0
-        preds = set_zero_sales_on_closed(preds, is_closed)
-        preds = pd.DataFrame(data=np.expm1(preds),  # Invert log1p transformation
-                             index=Xv.index,
-                             columns=yv.columns)
-        yv = ylog_v.apply(np.expm1)  # Invert log1p transformation for actuals
-
-        metrics = metrics_2d(yv, preds)
-        metrics.to_csv(metrics_filename)
-        booster.save_model(booster_filename)
-        preds.to_csv(predictions_filename)
-        yv.to_csv(actual_filename)
-        utils.plot_results(yv, preds)
-        plt.savefig(os.path.join(artifact_dir, "predictions.png"))
-
-    logger.info("Nested cross-validation complete. All results logged.")
-
-    return 
+    return

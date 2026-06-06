@@ -6,71 +6,12 @@ import optuna
 import numpy as np
 import pandas as pd
 import xgboost as xgb
-import matplotlib.pyplot as plt
-from matplotlib import cm
+from typing import Literal
 
 from optuna.study import Study
 from optuna.trial import Trial
 
 logger = logging.getLogger(__name__)
-
-def plot_results(actual: pd.DataFrame, predictions: pd.DataFrame):
-    """
-    Plot actual vs predicted sales for each store and each start date in a grid of line plots.
-    
-    Args
-    actual : pd.DataFrame
-        DataFrame containing the actual sales with a MultiIndex of (Date, Store).
-    predictions : pd.DataFrame
-        DataFrame containing the predicted sales with a MultiIndex of (Date, Store).
-
-    Returns
-    None
-    """
-    stores = actual.index.get_level_values("Store").unique().tolist()
-    dates = actual.index.get_level_values("Date").unique().tolist()
-    num_stores = len(stores)
-    forecast_horizon = len(dates)
-
-    fig, axes = plt.subplots(figsize=(num_stores * 3, forecast_horizon * 3),
-                                nrows=forecast_horizon,
-                                ncols=num_stores,
-                                sharex=True,
-                                sharey=True)
-    colors = cm.Set1(np.linspace(0, 1, num_stores))   # one unique color per store
-
-    for col, store in enumerate(stores):
-        for row, start_date in enumerate(dates):
-
-            # Get the actual and predicted sales for this store and this start date. 
-            # Both are Series with index lead_1_days, lead_2_days, … lead_N_days.
-            actual_store_date = actual.loc[(start_date, store)]
-            predicted_store_date = predictions.loc[(start_date, store)]
-            
-            ax = axes[row, col]
-            ax.plot(actual_store_date, marker='.', color=colors[store - 1], label=f"actual")
-            ax.plot(predicted_store_date, linestyle='--', marker='x', color=colors[store - 1], label=f"predicted")
-
-            # Set the title on the top row
-            if ax == axes[0, col]:
-                ax.set_title(f"Store {store}", fontsize=14, y=1.6)
-                ax.legend(loc='upper center', bbox_to_anchor=(0.5, 1.6), ncol=2, fontsize=10)
-
-            # Rotate x-axis labels on the last row
-            if ax == axes[-1, col]:
-                ticks = range(forecast_horizon)
-                tick_labels = [f"{i+1}_days_ahead" for i in range(forecast_horizon)]
-                ax.set_xticks(ticks)
-                ax.set_xticklabels(tick_labels, rotation=90, fontsize=6)
-
-            # Set y-axis label on the first column
-            if col == 0:
-                ax.set_ylabel(f"{start_date.date()}", fontsize=6)
-
-    plt.tight_layout()
-
-    return
-
 
 def save_trial_artifacts(
     study_name: str,
@@ -194,3 +135,33 @@ def log_trial_cv_results(
         f"best {metric}: {best_loss:.4f} at round {best_n_rounds}"
     )
 
+
+def overwrite_closed_sales(
+        sales: pd.Series,
+        mode: Literal['interpolate', 'zero'],
+        index_name: str = "Date"
+        ) -> pd.Series:
+    """ 
+    Re-interpolate sales for days when the store was closed (Sundays) with non-zero sales on adjacent days.
+
+    Args
+        sales: Series indexed by ['Date', 'Store'].
+        mode: Method to handle closed days. 'interpolate' fills closed days with interpolated values based on adjacent days' sales, while 'zero' fills closed days with zeros.
+        index_name: Name of the index level representing the date.
+    
+    Returns
+        Series with same structure as input, but with 'Sales' re-interpolated for closed days.
+    """
+    is_closed = sales.index.get_level_values(index_name).day_name() == 'Sunday'
+    sales.loc[is_closed] = np.nan
+
+    if mode == 'interpolate':
+        sales = (sales
+                 .unstack('Store')
+                 .interpolate(method='time')
+                 .stack('Store'))
+
+    elif mode == 'zero':
+        sales.loc[is_closed] = 0
+
+    return sales

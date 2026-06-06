@@ -1,6 +1,5 @@
 import numpy as np
-import pandas as pd
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
     """
@@ -27,7 +26,6 @@ def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
     # sklearn metrics
     mae  = float(mean_absolute_error(y_true, y_pred))
     rmse = float(np.sqrt(mean_squared_error(y_true, y_pred)))
-    r2   = float(r2_score(y_true, y_pred)) if y_true.size > 1 else float("nan")
 
     # percentage metrics
     nonzero = y_true != 0
@@ -38,37 +36,4 @@ def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
     else:
         mape = rmspe = float("nan")
 
-    return {"MAE": mae, "RMSE": rmse, "MAPE": mape, "RMSPE": rmspe, "R2": r2}
-
-def metrics_2d(y_true: np.ndarray, y_pred: np.ndarray) -> pd.DataFrame:
-    """
-    Compute forecasting metrics per horizon step + overall.
-    Parameters
-    ----------
-    y_true : np.ndarray
-        2D array of true values with shape (n_samples, n_steps).
-    y_pred : np.ndarray
-        2D array of predicted values with shape (n_samples, n_steps).
-
-    Returns
-    -------
-    pd.DataFrame
-        DataFrame containing metrics for each step and overall average.
-    """
-    y_true = np.asarray(y_true, float)
-    y_pred = np.asarray(y_pred, float)
-
-    if y_true.ndim == 1:
-        y_true = y_true.reshape(-1, 1)
-        y_pred = y_pred.reshape(-1, 1)
-
-    metrics = {
-        step + 1: metrics_1d(y_true[:, step], y_pred[:, step])
-        for step in range(y_true.shape[1])
-    }
-
-    df = pd.DataFrame(metrics).T
-    df.index.name = "step"
-    df.loc["overall"] = df.mean()
-
-    return df
+    return {"MAE": mae, "RMSE": rmse, "MAPE": mape, "RMSPE": rmspe}
