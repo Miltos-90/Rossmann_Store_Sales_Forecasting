@@ -56,7 +56,7 @@ study_config = {
     "n_jobs":                1,
     "seed":                  SEED,
     "log_dir":               LOG_DIR,
-    "num_boost_rounds":      300,
+    "num_boost_rounds":      5000,
     "early_stopping_rounds": 20,
     "monitor_periods":       50,
     "xgb_constants": {
@@ -85,7 +85,6 @@ study_config = {
 # the model can overfit easily and produce low errors.
 
 dates    = pd.date_range("2013-01-01", periods=DAYS, freq="D")
-
 rows = []
 for store_id in range(1, N_STORES + 1):
     base = 300 + store_id * 150          # stores differ in overall level

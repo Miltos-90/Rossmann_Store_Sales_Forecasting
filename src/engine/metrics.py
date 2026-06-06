@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-def _metrics_1d(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
+def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
     """
     Compute forecasting metrics for 1D arrays of true and predicted values.
 
@@ -40,7 +40,7 @@ def _metrics_1d(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
 
     return {"MAE": mae, "RMSE": rmse, "MAPE": mape, "RMSPE": rmspe, "R2": r2}
 
-def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> pd.DataFrame:
+def metrics_2d(y_true: np.ndarray, y_pred: np.ndarray) -> pd.DataFrame:
     """
     Compute forecasting metrics per horizon step + overall.
     Parameters
@@ -63,7 +63,7 @@ def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> pd.DataFrame:
         y_pred = y_pred.reshape(-1, 1)
 
     metrics = {
-        step + 1: _metrics_1d(y_true[:, step], y_pred[:, step])
+        step + 1: metrics_1d(y_true[:, step], y_pred[:, step])
         for step in range(y_true.shape[1])
     }
 

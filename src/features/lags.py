@@ -8,7 +8,7 @@ from pandas.tseries.offsets import DateOffset
 from .utils import to_list, pivot, melt, align
 
 
-def make_lags(df: pd.DataFrame, lags: int | Iterable[int]) -> pd.DataFrame:
+def make_lags(df: pd.DataFrame, lags: int | Iterable[int], names: list[str] = None) -> pd.DataFrame:
     """
     Generate and merge multiple lagged feature DataFrames based on one or more DateOffset objects.
 
@@ -39,10 +39,15 @@ def make_lags(df: pd.DataFrame, lags: int | Iterable[int]) -> pd.DataFrame:
     lag_dfs = []
     for lag in lags:
         offset = lag if isinstance(lag, DateOffset) else DateOffset(days=lag)
-        name = "_".join(f"lag_{v}_{k}" for k, v in offset.kwds.items())
         prior_index = df_p.index - offset
         df_p_lagged = df_p.reindex(prior_index)
         df_p_lagged.index = df_p.index
+
+        if names is not None:
+            name = names.pop(0)
+        else:
+            name = "_".join(f"lag_{v}_{k}" for k, v in offset.kwds.items())
+
         lag_dfs.append(melt(df_p_lagged, name))
 
     return align(df, lag_dfs)

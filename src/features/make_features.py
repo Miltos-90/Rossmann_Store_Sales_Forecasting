@@ -33,6 +33,7 @@ def make_features(df: pd.DataFrame,
     ----------
     df : pd.DataFrame
         Input DataFrame containing sales and related metadata per store and date.
+        The index should be a MultiIndex of (Date, Store) or the DataFrame should have 'Date' and 'Store' columns.
     lags : int or Iterable[int]
         List (or single value) of lag periods (in days) to compute past sales values.
         For example, `[1, 7, 30]` creates features for sales 1, 7, and 30 days ago.
@@ -52,29 +53,30 @@ def make_features(df: pd.DataFrame,
     diffs = to_list(diffs)
     roll_windows = {w: to_list(window_lags) for w, window_lags in roll_windows.items()}
 
-    sales_df = df[['Date', 'Store', 'Sales']]
+    df_ = df.reset_index()  # Ensure 'Date' and 'Store' are columns for merging later
+    sales_df = df_[['Date', 'Store', 'Sales']]
 
     # Competition-related features
-    df['CompetitionDistance'] = df['CompetitionDistance'].apply(np.log1p)
-    df['CompetitionSinceMonths'] = ( (df['Date'] - df['CompetitionSinceDate']).dt.days / 30.0 ).round()
+    df_['CompetitionDistance'] = df_['CompetitionDistance'].apply(np.log1p)
+    df_['CompetitionSinceMonths'] = ( (df_['Date'] - df_['CompetitionSinceDate']).dt.days / 30.0 ).round()
 
     # Calendar and seasonality features
-    df['is_weekend'] = df['Date'].dt.dayofweek >= 5
-    df['DayOfMonth'] = df['Date'].dt.day
-    df['is_month_start'] = (df['Date'].dt.day <= 3).astype(bool)
-    df['is_month_end'] = (df['Date'].dt.day >= 28).astype(bool)
+    df_['is_weekend'] = df_['Date'].dt.dayofweek >= 5
+    df_['DayOfMonth'] = df_['Date'].dt.day
+    df_['is_month_start'] = (df_['Date'].dt.day <= 3).astype(bool)
+    df_['is_month_end'] = (df_['Date'].dt.day >= 28).astype(bool)
 
     # Basic date features
-    df['WeekOfYear'] = df['Date'].dt.isocalendar().week
-    df['Month'] = df['Date'].dt.month
-    df['Year'] = df['Date'].dt.year
-    df['Quarter'] = df['Date'].dt.quarter
+    df_['WeekOfYear'] = df_['Date'].dt.isocalendar().week
+    df_['Month'] = df_['Date'].dt.month
+    df_['Year'] = df_['Date'].dt.year
+    df_['Quarter'] = df_['Date'].dt.quarter
 
     # Cyclical features
-    cyclic_day_of_month = make_cyclic(df['DayOfMonth'], period=31)
-    cyclic_day_of_month.index = pd.MultiIndex.from_frame(df[['Date', 'Store']])
-    cyclic_week_of_year = make_cyclic(df['WeekOfYear'], period=52)
-    cyclic_week_of_year.index = pd.MultiIndex.from_frame(df[['Date', 'Store']])
+    cyclic_day_of_month = make_cyclic(df_['DayOfMonth'], period=31)
+    cyclic_day_of_month.index = pd.MultiIndex.from_frame(df_[['Date', 'Store']])
+    cyclic_week_of_year = make_cyclic(df_['WeekOfYear'], period=52)
+    cyclic_week_of_year.index = pd.MultiIndex.from_frame(df_[['Date', 'Store']])
 
     # Lagged features
     lag_df = make_lags(sales_df, lags).set_index(['Date', 'Store'])
@@ -89,27 +91,27 @@ def make_features(df: pd.DataFrame,
     diff_df = make_differences(sales_df, diffs).set_index(['Date', 'Store'])
 
     # Holiday proximity features
-    holiday_proximity_df = make_holiday_proximity(df).set_index(['Date', 'Store'])
+    holiday_proximity_df = make_holiday_proximity(df_).set_index(['Date', 'Store'])
 
     # Consecutive promotion days
-    consecutive_promo_df = make_consecutive_promo(df, 'Promo').set_index(['Date', 'Store'])
-    consecutive_promo2_df = make_consecutive_promo(df, 'Promo2').set_index(['Date', 'Store'])
+    consecutive_promo_df = make_consecutive_promo(df_, 'Promo').set_index(['Date', 'Store'])
+    consecutive_promo2_df = make_consecutive_promo(df_, 'Promo2').set_index(['Date', 'Store'])
 
     # Merge everything (all feature DataFrames share the same (Date, Store) MultiIndex;
     # join() on the index avoids duplicate Date/Store columns that pd.merge would produce)
     feature_list = [cyclic_day_of_month, cyclic_week_of_year, lag_df, diff_df, holiday_proximity_df,
                     consecutive_promo_df, consecutive_promo2_df] + window_dfs
     merged = reduce(lambda left, right: left.join(right, how='outer'), feature_list).reset_index()
-    df = df.merge(merged, on=['Date', 'Store'], how='left')
+    df_ = df_.merge(merged, on=['Date', 'Store'], how='left')
 
     # Encode categorical features as pandas Categorical dtype
     for col in CATEGORICAL_FEATURES:
-        if col in df.columns:
-            df[col] = pd.Categorical(df[col])
+        if col in df_.columns:
+            df_[col] = pd.Categorical(df_[col])
 
     # Cleanup: drop intermediate columns that are not needed for modeling, but keep 'Store' as a categorical feature.
-    df.drop(['Promo2SinceDate', 'CompetitionSinceDate', 'DayOfMonth', 'WeekOfYear', 'Sales'], axis=1, inplace=True)
-    df['Store_id'] = df['Store'].astype('category')
-    df.set_index(['Date', 'Store'], inplace=True)
+    df_.drop(['Promo2SinceDate', 'CompetitionSinceDate', 'Open', 'DayOfMonth', 'WeekOfYear', 'Sales'], axis=1, inplace=True)
+    df_['Store_id'] = df_['Store'].astype('category')
+    df_.set_index(['Date', 'Store'], inplace=True)
 
-    return df
+    return df_
