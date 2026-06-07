@@ -36,4 +36,9 @@ def compute_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
     else:
         mape = rmspe = float("nan")
 
-    return {"MAE": mae, "RMSE": rmse, "MAPE": mape, "RMSPE": rmspe}
+    metrics = {"MAE": round(mae, 3),
+               "RMSE": round(rmse, 3),
+               "MAPE": round(mape, 3),
+               "RMSPE": round(rmspe, 3)}
+
+    return metrics

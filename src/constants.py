@@ -27,10 +27,16 @@ ROLL_WINDOWS = { 7: [DateOffset(days=1), DateOffset(weeks=1)],
 
 # Training settings
 FORECAST_HORIZON        = 42 # of days to predict
+
+# CV settings
 N_OUTER_SPLITS          = 6 # number of outer CV splits
 OUTER_TRAIN_SIZE        = 650 # of days in the training portion of each outer CV split
 N_INNER_SPLITS          = 4 # number of inner CV splits for hyperparameter tuning
-INNER_TRAIN_SIZE        = 180   # of days in the training portion of each inner CV split 
+INNER_TRAIN_SIZE        = 180   # of days in the training portion of each inner CV split
+OUTER_TRAIN_SIZE        = \
+    (N_INNER_SPLITS + 1) * FORECAST_HORIZON + INNER_TRAIN_SIZE  # calculated to ensure that the last inner split ends at least FORECAST_HORIZON days before the 
+                                                                # end of the outer training period, allowing for a full forecast horizon in the inner validation sets.
+# Hyperparameter tuning settings
 NUM_TRIALS              = 100 # number of Optuna trials for hyperparameter tuning in each outer CV split
 SEED                    = 42 # random seed for reproducibility
 MONITOR_PERIODS         = 100 # number of CV rounds to report in pruning callback
@@ -49,14 +55,14 @@ XGB_CONSTANTS: dict = {
 }
 
 HYPERPARAMETERS = {
-    "max_depth":        ("suggest_int",   2,    10,   {"log": False}),
-    "learning_rate":    ("suggest_float", 1e-3, 0.3,  {"log": True}),
-    "subsample":        ("suggest_float", 0.5,  1.0,  {"log": False}),
-    "colsample_bytree": ("suggest_float", 0.5,  1.0,  {"log": False}),
-    "min_child_weight": ("suggest_float", 1e-2, 50.0, {"log": True}),
-    "reg_alpha":        ("suggest_float", 1e-8, 10.0, {"log": True}),
-    "reg_lambda":       ("suggest_float", 1e-8, 10.0, {"log": True}),
-    "gamma":            ("suggest_float", 0.0,  10.0, {"log": False}),
+    "max_depth":        ("suggest_int",   3,    10,   {"log": False}),
+    "learning_rate":    ("suggest_float", 0.01, 0.3,  {"log": True}),
+    "subsample":        ("suggest_float", 0.6,  1.0,  {"log": False}), 
+    "colsample_bytree": ("suggest_float", 0.6,  1.0,  {"log": False}), 
+    "min_child_weight": ("suggest_int",   1,    20,   {"log": False}),
+    "reg_alpha":        ("suggest_float", 1e-3, 1.0,  {"log": True}),
+    "reg_lambda":       ("suggest_float", 1e-3, 5.0,  {"log": True}),
+    "gamma":            ("suggest_float", 0.0,  2.0,  {"log": False}),
 }
 
 
