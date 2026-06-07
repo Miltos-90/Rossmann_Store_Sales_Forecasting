@@ -234,7 +234,5 @@ def predict(booster: xgb.Booster, X_test: pd.DataFrame) -> pd.Series:
     log_preds = pd.DataFrame(data=log_preds_raw, index=X_test.index)
     preds_long = _wide_to_long_predictions(log_preds)
     preds = overwrite_closed_sales(preds_long, mode='zero', index_name="Forecast Date")
-    preds = preds.apply(np.expm1)
-
     return preds
 
