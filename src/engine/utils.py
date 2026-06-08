@@ -144,12 +144,12 @@ def overwrite_closed_sales(
     """ 
     Re-interpolate sales for days when the store was closed (Sundays) with non-zero sales on adjacent days.
 
-    Args
+    Args:
         sales: Series indexed by ['Date', 'Store'].
         mode: Method to handle closed days. 'interpolate' fills closed days with interpolated values based on adjacent days' sales, while 'zero' fills closed days with zeros.
         index_name: Name of the index level representing the date.
-    
-    Returns
+
+    Returns:
         Series with same structure as input, but with 'Sales' re-interpolated for closed days.
     """
     is_closed = sales.index.get_level_values(index_name).day_name() == 'Sunday'

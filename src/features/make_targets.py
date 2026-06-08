@@ -1,7 +1,7 @@
 import pandas as pd
 from .lags import make_lags
 
-def make_targets(df: pd.Series, horizon: int) -> pd.DataFrame:
+def make_targets(df: pd.Series, horizon: int) -> pd.Series:
     """
     Generate multiple "future-shifted" target columns for each step in the forecast horizon.
 
@@ -10,11 +10,10 @@ def make_targets(df: pd.Series, horizon: int) -> pd.DataFrame:
         horizon: The number of future time steps to forecast.
 
     Returns:
-        A DataFrame with the same MultiIndex and new columns for each future target, named as '-1', '-2', ..., '-horizon'.
+        A Series with the same MultiIndex and the future target values for the specified horizon.
     """
 
-    #lags = range(-1, -(horizon + 1), -1)
-    lags = [-horizon]
-    lag_df = make_lags(df.reset_index() , lags, names=[f'{-l}' for l in lags])
-    lag_df.set_index(['Date', 'Store'], inplace=True)
+    lag_df = make_lags(df.reset_index(), lags=[-horizon], names=[str(horizon)])
+    lag_df = lag_df.set_index(['Date', 'Store'])[str(horizon)]
+
     return lag_df

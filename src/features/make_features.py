@@ -22,6 +22,9 @@ CATEGORICAL_FEATURES = ['Promo', 'Promo2', 'SchoolHoliday',
                         'DayOfWeek', 'Quarter', 'Year', 'Month', 'Open',
                         'is_month_end', 'is_month_start', 'is_weekend']
 
+DAYS_IN_MONTH = 30
+WEEKS_IN_YEAR = 52
+
 def make_features(df: pd.DataFrame,
                   lags: int | Iterable[int],
                   roll_windows: Dict[int, int | Iterable[int]],
@@ -73,22 +76,31 @@ def make_features(df: pd.DataFrame,
     df_['Quarter'] = df_['Date'].dt.quarter
 
     # Cyclical features
-    cyclic_day_of_month = make_cyclic(df_['DayOfMonth'], period=31)
+    cyclic_day_of_month = make_cyclic(df_['DayOfMonth'], period=DAYS_IN_MONTH)
     cyclic_day_of_month.index = pd.MultiIndex.from_frame(df_[['Date', 'Store']])
-    cyclic_week_of_year = make_cyclic(df_['WeekOfYear'], period=52)
+    cyclic_week_of_year = make_cyclic(df_['WeekOfYear'], period=WEEKS_IN_YEAR)
     cyclic_week_of_year.index = pd.MultiIndex.from_frame(df_[['Date', 'Store']])
 
     # Lagged features
-    lag_df = make_lags(sales_df, lags).set_index(['Date', 'Store'])
+    if lags:
+        lag_df = make_lags(sales_df, lags).set_index(['Date', 'Store'])
+    else:
+        lag_df = pd.DataFrame(index=pd.MultiIndex.from_frame(df_[['Date', 'Store']]))  # Empty DataFrame if no lags specified
 
-    # Rolling window features
-    window_dfs = []
-    for window, lags in roll_windows.items():
-        window_df = make_rolling(sales_df, window, lags).set_index(['Date', 'Store'])
-        window_dfs.append(window_df)
+
+    if roll_windows:
+        window_dfs = []
+        for window, window_lags in roll_windows.items():
+            window_df = make_rolling(sales_df, window, window_lags).set_index(['Date', 'Store'])
+            window_dfs.append(window_df)
+    else:
+        window_dfs = []  # No rolling features if roll_windows is empty
 
     # First-order differencing features
-    diff_df = make_differences(sales_df, diffs).set_index(['Date', 'Store'])
+    if diffs:
+        diff_df = make_differences(sales_df, diffs).set_index(['Date', 'Store'])
+    else:
+        diff_df = pd.DataFrame(index=pd.MultiIndex.from_frame(df_[['Date', 'Store']]))  # Empty DataFrame if no diffs specified
 
     # Holiday proximity features
     holiday_proximity_df = make_holiday_proximity(df_).set_index(['Date', 'Store'])
@@ -110,7 +122,8 @@ def make_features(df: pd.DataFrame,
             df_[col] = pd.Categorical(df_[col])
 
     # Cleanup: drop intermediate columns that are not needed for modeling, but keep 'Store' as a categorical feature.
-    df_.drop(['Promo2SinceDate', 'CompetitionSinceDate', 'Open', 'DayOfMonth', 'WeekOfYear', 'Sales'], axis=1, inplace=True)
+    cleanup_cols = ['Promo2SinceDate', 'CompetitionSinceDate', 'Open', 'DayOfMonth', 'WeekOfYear', 'Sales']
+    df_.drop(cleanup_cols, axis=1, inplace=True)
     df_['Store_id'] = df_['Store'].astype('category')
     df_.set_index(['Date', 'Store'], inplace=True)
 
