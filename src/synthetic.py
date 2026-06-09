@@ -35,15 +35,28 @@ def sales_data(n_stores=N_STORES, days=DAYS, seed=SEED):
 
 def store_data(n_stores=N_STORES):
 
-    stores = pd.DataFrame({
-        "Store":               list(range(1, n_stores + 1)),
-        "StoreType":           ["a", "b", "c"],
-        "Assortment":          ["a", "a", "b"],
-        "CompetitionDistance": [500.0, 1200.0, 800.0],
-        "CompetitionSinceDate": pd.to_datetime(["2012-03-01", "2011-06-01", "2013-01-01"]),
-        "Promo2SinceDate":     pd.to_datetime(["2012-06-01", pd.NaT,       "2013-03-01"]),
-        "PromoInterval":       ["Jan,Apr,Jul,Oct", None,                   "Mar,Jun,Sep,Dec"],
-    })
+    # Generate synthetic store data with some variability across stores
+    stores = []
+    for store_id in range(1, n_stores + 1):
+        store_type = ["a", "b", "c"][(store_id - 1) % 3]
+        assortment = ["a", "a", "b"][(store_id - 1) % 3]
+        competition_distance = 500.0 + (store_id - 1) * 350
+        competition_since_date = pd.to_datetime("2012-01-01") + pd.DateOffset(months=store_id * 3)
+        promo2_since_date = pd.to_datetime("2012-01-01") + pd.DateOffset(months=store_id * 6) if store_id % 2 == 1 else pd.NaT
+        promo_interval = "Jan,Apr,Jul,Oct" if store_id % 2 == 1 else None
+
+        record = {
+            "Store":               store_id,
+            "StoreType":           store_type,
+            "Assortment":          assortment,
+            "CompetitionDistance": competition_distance,
+            "CompetitionSinceDate": competition_since_date,
+            "Promo2SinceDate":     promo2_since_date,
+            "PromoInterval":       promo_interval,
+        }
+
+        stores.append(record)
+
+    stores = pd.DataFrame(stores)
 
     return stores
-
