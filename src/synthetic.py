@@ -14,10 +14,10 @@ def sales_data(n_stores=N_STORES, days=DAYS, seed=SEED):
         for date in dates:
             dow      = date.dayofweek + 1    # 1=Mon … 7=Sun
             is_sun   = dow == 7
-            seasonal = base + 20 * np.sin(2 * np.pi * (dow - 1) / 6)   # peak Wed
-            trend    = 0.15 * (date - dates[0]).days
+            seasonal = 20 * np.sin(2 * np.pi * (dow - 1) / 6)   # peak Wed
+            trend    = 0.5 * store_id * (date - dates[0]).days
             promo    = int(rng.random() < 0.25)
-            sales    = max(0.0, seasonal + trend + promo * 100) if not is_sun else 0.0
+            sales    = max(0.0, base + seasonal + trend + promo * 100) if not is_sun else 0.0
             rows.append({
                 "Date":          date,
                 "Store":         store_id,

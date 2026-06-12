@@ -83,5 +83,6 @@ def drop_null_targets(X: pd.DataFrame, y: pd.DataFrame) -> tuple[pd.DataFrame, p
     Returns:
         tuple[pd.DataFrame, pd.Series]: Filtered X and y with null target samples removed
     """
-    non_null_targets = ~y.isnull().any(axis=1)
-    return X[non_null_targets], y[non_null_targets]
+    non_null_targets = ~y.isnull()
+    X, y = X[non_null_targets], y[non_null_targets]
+    return X, y

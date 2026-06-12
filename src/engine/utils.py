@@ -153,9 +153,9 @@ def overwrite_closed_sales(
         Series with same structure as input, but with 'Sales' re-interpolated for closed days.
     """
     is_closed = sales.index.get_level_values(index_name).day_name() == 'Sunday'
-    sales.loc[is_closed] = np.nan
-
+    
     if mode == 'interpolate':
+        sales.loc[is_closed] = np.nan
         sales = (sales
                  .unstack('Store')
                  .interpolate(method='time')

@@ -21,16 +21,14 @@ class TimeSeriesCV(BaseCrossValidator):
     in non-overlapping steps of ``test_size`` days.  Fold 1 is the earliest
     and fold ``n_splits`` is the latest (anchored to the end of the dataset).
 
-    Minimum data required: ``train_size + n_splits * test_size`` days.
-
     Parameters
     ----------
     n_splits : int
         Number of folds.
     train_size : int
-        Number of days in each training window.
+        Number of days in each training window per store.
     test_size : int
-        Number of days in each test window.  Also the step between consecutive
+        Number of days in each test window per store.  Also the step between consecutive
         folds.
 
     Examples
@@ -81,15 +79,7 @@ class TimeSeriesCV(BaseCrossValidator):
             .sort_values()
         )
         n_dates = len(dates)
-        min_required = self.train_size + self.n_splits * self.test_size
-
-        if min_required > n_dates:
-            raise ValueError(
-                f"train_size + n_splits * test_size = {min_required} > n_dates = {n_dates}. "
-                "Not enough data. Reduce n_splits, train_size, or test_size."
-            )
-
-        date_values   = X.index.get_level_values("Date")
+        date_values = X.index.get_level_values("Date")
         row_positions = np.arange(len(X))
 
         for fold in range(1, self.n_splits + 1):
@@ -113,7 +103,7 @@ class TimeSeriesCV(BaseCrossValidator):
             train_idx = row_positions[train_mask]
             test_idx  = row_positions[test_mask]
 
-            print(
+            logger.info(
                 f"Fold {fold}/{self.n_splits}  train={len(train_idx)} samples [{train_start_date.date()}" 
                 f" -> {train_end_date.date()}]  test={len(test_idx)} samples [{test_start_date.date()} -> "
                 f"{test_end_date.date()}]"

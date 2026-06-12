@@ -14,12 +14,14 @@ LOG_FILE = os.path.join(LOG_DIR, "hypertuning.log")
 STORAGE_URL = f"sqlite:///{os.path.join(LOG_DIR, 'hypertuning.db')}"
 
 # Feature engineering settings
-LAGS = [DateOffset(days=1),   DateOffset(days=2), DateOffset(days=3),
-        DateOffset(weeks=1),  DateOffset(weeks=2),  DateOffset(weeks=3),
-        DateOffset(months=1), DateOffset(months=3), DateOffset(months=6),
-        DateOffset(years=1)]
+LAGS = (
+    [DateOffset(days=d) for d in np.arange(1, 7)] + 
+    [DateOffset(weeks=w) for w in np.arange(1, 4)] + 
+    [DateOffset(months=m) for m in np.arange(1, 4)] +
+    [DateOffset(years=1)]
+)
 
-DIFFS = []#[DateOffset(days=1), DateOffset(months=1), DateOffset(months=3), DateOffset(months=6)]
+DIFFS = [DateOffset(days=d) for d in np.arange(1, 7)]
 
 ROLL_WINDOWS = { 7: [DateOffset(days=1)], 30: [DateOffset(days=1)], 90: [DateOffset(days=1)]}
 
