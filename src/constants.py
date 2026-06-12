@@ -29,13 +29,14 @@ ROLL_WINDOWS = { 7: [DateOffset(days=1)], 30: [DateOffset(days=1)], 90: [DateOff
 FORECAST_HORIZON        = 42 # of days to predict
 
 # CV settings
-N_OUTER_SPLITS          = 6 # number of outer CV splits
-OUTER_TRAIN_SIZE        = 650 # of days in the training portion of each outer CV split
-N_INNER_SPLITS          = 4 # number of inner CV splits for hyperparameter tuning
-INNER_TRAIN_SIZE        = 180   # of days in the training portion of each inner CV split
-OUTER_TRAIN_SIZE        = \
-    (N_INNER_SPLITS + 1) * FORECAST_HORIZON + INNER_TRAIN_SIZE  # calculated to ensure that the last inner split ends at least FORECAST_HORIZON days before the 
-                                                                # end of the outer training period, allowing for a full forecast horizon in the inner validation sets.
+N_OUTER_SPLITS   = 5
+OUTER_TEST_SIZE  = 60
+OUTER_TRAIN_SIZE = 365 * 2
+N_INNER_SPLITS   = 3
+INNER_TEST_SIZE  = 60
+INNER_TRAIN_SIZE = OUTER_TRAIN_SIZE - (N_INNER_SPLITS * INNER_TEST_SIZE)
+
+
 # Hyperparameter tuning settings
 NUM_TRIALS              = 100 # number of Optuna trials for hyperparameter tuning in each outer CV split
 SEED                    = 42 # random seed for reproducibility
