@@ -63,6 +63,7 @@ def make_features(df: pd.DataFrame,
     df_['CompetitionDistance'] = df_['CompetitionDistance'].apply(np.log1p)
     df_['CompetitionSinceMonths'] = ( (df_['Date'] - df_['CompetitionSinceDate']).dt.days / 30.0 ).round()
 
+    """
     # Calendar and seasonality features
     df_['is_weekend'] = df_['Date'].dt.dayofweek >= 5
     df_['DayOfMonth'] = df_['Date'].dt.day
@@ -101,7 +102,7 @@ def make_features(df: pd.DataFrame,
         diff_df = make_differences(sales_df, diffs).set_index(['Date', 'Store'])
     else:
         diff_df = pd.DataFrame(index=pd.MultiIndex.from_frame(df_[['Date', 'Store']]))  # Empty DataFrame if no diffs specified
-
+    """
     # Holiday proximity features
     holiday_proximity_df = make_holiday_proximity(df_).set_index(['Date', 'Store'])
 
