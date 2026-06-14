@@ -1,3 +1,27 @@
+"""
+This module contains functions to create features related to store holidays and promotions for the Rossmann Store Sales
+dataset. It includes functions to calculate the number of days to the next holiday, days since the last holiday,
+days since competition started, and the number of consecutive promotion days. These features are essential for
+modeling the sales patterns influenced by holidays and promotions.
+
+NOTE ON OFFSET BEHAVIOR:
+Functions that accept an `offset` parameter (e.g., days_in_promotion, holiday_counters, days_with_competition) 
+look up values at the shifted date (d + offset) to align with a forecast horizon. This means:
+  - For each row at date d, the feature value reflects the state at d + offset
+  - Rows within `offset` distance from the end of observed data will have NaN values 
+    (since d + offset falls outside the available data range)
+
+Example with days_in_promotion and offset=2 days:
+    date  | promo | consecutive_block | lookup (d+offset) | feature_value
+    ------|-------|-------------------|--------------------|---------------
+    d1    | 0     | 0                 | d3 → 2             | 2
+    d2    | 1     | 1                 | d4 → 3             | 3
+    d3    | 1     | 2                 | d5 → 0             | 0
+    d4    | 1     | 3                 | d6 → 1             | 1
+    d5    | 0     | 0                 | d7 → 2             | 2
+    d6    | 1     | 1                 | d8 → NaN           | NaN        (future data not available)
+    d7    | 1     | 2                 | d9 → NaN           | NaN        (future data not available)
+"""
 
 import pandas as pd
 import numpy as np
@@ -55,7 +79,7 @@ def _days_since_holiday(holiday_days: np.ndarray, dates_days: np.ndarray) -> np.
     return days_since_last_holiday
 
 
-def holiday_counters(group: pd.Series, offset: pd.DateOffset) -> pd.DataFrame:
+def holiday_counters(group: pd.Series, offset: pd.DateOffset = pd.DateOffset(0)) -> pd.DataFrame:
     """ 
     Calculate holiday-related features for a given group of dates.
 
@@ -85,7 +109,7 @@ def holiday_counters(group: pd.Series, offset: pd.DateOffset) -> pd.DataFrame:
     return res.reindex(group.index)
 
 
-def competition_since_days(competition_since_date: pd.Series, offset: pd.DateOffset) -> pd.DataFrame:
+def days_with_competition(competition_since_date: pd.Series, offset: pd.DateOffset = pd.DateOffset(0)) -> pd.Series:
     """Calculate the number of days since the competition started for each date.
 
     Args:
@@ -93,11 +117,46 @@ def competition_since_days(competition_since_date: pd.Series, offset: pd.DateOff
         offset (pd.DateOffset): A pandas DateOffset object representing the offset to apply to the dates.
 
     Returns:
-        pd.DataFrame: A DataFrame with the number of days since the competition started, with NaN for dates before the competition started.
+        pd.Series: A pandas Series with the number of days since the competition started, with NaN for dates before the competition started.
     """
-    s = competition_since_date.copy()
+    s = competition_since_date.sort_index()
     dates = s.index.to_series() + offset
     res = (dates - s).dt.days
     res = res.where(res >= 0, np.nan)
     res.name = 'CompetitionDaysSinceStart'
-    return res.to_frame()  # Return as DataFrame to maintain consistency with other feature functions
+
+    res = res.reindex(competition_since_date.index)  # Ensure the result is aligned with the original index
+    return res
+    
+
+def days_in_promotion(s: pd.Series, offset: pd.DateOffset = pd.DateOffset(0)) -> pd.Series:
+    """ Calculate the number of consecutive promotions for each date in the series.
+    
+    Args:
+        s (pd.Series): A pandas Series representing the promotion status (1 for active, 0 for inactive).
+        offset (pd.DateOffset): A DateOffset to shift the lookup dates (e.g. forecast horizon).
+
+    Returns:
+        pd.Series: A pandas Series with the same index as the input, containing the number of consecutive promotions.
+    """
+
+    # Ensure the series is sorted by index from least recent to most recent
+    s_sorted = s.sort_index()
+
+    # Create a boolean series where the promotion is active
+    is_promo_active = s_sorted == 1
+
+    # Generate unique IDs for each block of consecutive promotions
+    block_id = (~is_promo_active).cumsum()
+
+    # Group by the blocks and calculate the cumulative sum
+    consecutive_block = is_promo_active.groupby(block_id).cumsum()
+
+    # Look up the consecutive count at (index + offset) and restore original index
+    lookup_index = s_sorted.index + offset
+    result = consecutive_block.reindex(lookup_index)
+    result.index = s_sorted.index
+
+    # Reorder the result to match the original order of the input series
+    result = result.reindex(s.index)
+    return result

@@ -28,7 +28,7 @@ def sales_data(n_stores=N_STORES, days=DAYS, seed=SEED):
                 "Promo":         promo,
                 "StateHoliday":  state_hol,
                 "SchoolHoliday": school_hol,
-                "Sales":         sales,
+                "Sales":         sales
             })
 
     train = pd.DataFrame(rows)
@@ -44,8 +44,13 @@ def store_data(n_stores=N_STORES):
         assortment = ["a", "a", "b"][(store_id - 1) % 3]
         competition_distance = 500.0 + (store_id - 1) * 350
         competition_since_date = pd.to_datetime("2012-01-01") + pd.DateOffset(months=store_id * 3)
-        promo2_since_date = pd.to_datetime("2012-01-01") + pd.DateOffset(months=store_id * 6) if store_id % 2 == 1 else pd.NaT
-        promo_interval = "Jan,Apr,Jul,Oct" if store_id % 2 == 1 else None
+        promo2 = 1 if store_id % 2 == 1 else 0
+        if promo2 == 1:
+            promo2_since_date = pd.to_datetime("2012-01-01") + pd.DateOffset(months=store_id * 6)
+            promo_interval = "Jan,Apr,Jul,Oct"
+        else:
+            promo2_since_date = pd.NaT
+            promo_interval = ""
 
         record = {
             "Store":               store_id,
@@ -55,6 +60,7 @@ def store_data(n_stores=N_STORES):
             "CompetitionSinceDate": competition_since_date,
             "Promo2SinceDate":     promo2_since_date,
             "PromoInterval":       promo_interval,
+            "Promo2":              promo2
         }
 
         stores.append(record)

@@ -160,7 +160,7 @@ def diffs(target: pd.Series, diffs: list[pd.DateOffset], lag: pd.DateOffset) -> 
     return _generate_features(target, items=diffs, make_func=_make_diff, lag=lag)
 
 
-def rolling(target: pd.Series, windows: list[int], func: str, lag: pd.DateOffset) -> pd.DataFrame:
+def rolling(target: pd.Series, windows: list[int], agg_func: str, lag: pd.DateOffset) -> pd.DataFrame:
     """ 
     Create rolling features for a given target series.
     This function calculates the rolling statistic (e.g., mean, sum, max, min) over a specified window size for the target series.
@@ -170,10 +170,10 @@ def rolling(target: pd.Series, windows: list[int], func: str, lag: pd.DateOffset
     Args:
         target (pd.Series): The target series for which to create rolling features. The index of the series should be a datetime index.
         windows (list[int]): A list of integers representing the window sizes for the rolling statistic.
-        func (str): The aggregation function to apply over the rolling window. This can be any valid pandas aggregation function such as 'mean', 'sum', 'max', 'min', etc.
+        agg_func (str): The aggregation function to apply over the rolling window. This can be any valid pandas aggregation function such as 'mean', 'sum', 'max', 'min', etc.
         lag (pd.DateOffset): A pandas DateOffset object representing the lag to use for calculating the rolling statistic.
 
     Returns:
         pd.DataFrame: A DataFrame containing the rolling features, with each column named according to the window size and function applied (e.g., 'rolling_mean_3', 'rolling_sum_5', etc.).
     """
-    return _generate_features(target, items=windows, make_func=_make_rolling, lag=lag, func=func)
+    return _generate_features(target, items=windows, make_func=_make_rolling, lag=lag, func=agg_func)
