@@ -4,30 +4,27 @@ This module contains functions to generate calendar features for time series for
 
 import pandas as pd
 
-def calendar(dates: pd.Series, forecast_offset: pd.DateOffset) -> pd.DataFrame:
+def calendar(dates: pd.Series) -> pd.DataFrame:
     """ 
     Generate calendar features for the target forecast dates, which are obtained by adding the forecast_offset to the input dates.
 
     Args:
         dates (pd.Series): A series of dates for which to generate features.
-        forecast_offset (pd.DateOffset): The offset to apply to the input dates to get the target forecast dates.
 
     Returns:
         pd.DataFrame: A DataFrame containing the generated calendar features for the target forecast dates.
     """
-    
-    fdates = dates.apply(lambda x: x + forecast_offset)
 
     features = {
-        "year": fdates.dt.year,
-        "quarter": fdates.dt.quarter,
-        "month": fdates.dt.month,
-        "week_of_month": fdates.dt.day // 7 + 1,
-        "day_of_week": fdates.dt.dayofweek,
-        "is_month_start": fdates.dt.is_month_start,
-        "is_weekend": fdates.dt.dayofweek >= 5,
-        "is_weekday": fdates.dt.dayofweek < 5,
-        "is_month_end": fdates.dt.is_month_end,
+        "year": dates.dt.year,
+        "quarter": dates.dt.quarter,
+        "month": dates.dt.month,
+        "week_of_month": dates.dt.day // 7 + 1,
+        "day_of_week": dates.dt.dayofweek,
+        "is_month_start": dates.dt.is_month_start,
+        "is_weekend": dates.dt.dayofweek >= 5,
+        "is_weekday": dates.dt.dayofweek < 5,
+        "is_month_end": dates.dt.is_month_end,
     }
 
     return pd.DataFrame.from_dict(features)

@@ -17,6 +17,8 @@ def sales_data(n_stores=N_STORES, days=DAYS, seed=SEED):
             seasonal = 20 * np.sin(2 * np.pi * (dow - 1) / 6)   # peak Wed
             trend    = 0.5 * store_id * (date - dates[0]).days
             promo    = int(rng.random() < 0.25)
+            state_hol = "0" if rng.random() >= 0.1 else "a"  # 10% chance of state holiday
+            school_hol = 1 if rng.random() < 0.15 else 0  # 15% chance of school holiday
             sales    = max(0.0, base + seasonal + trend + promo * 100) if not is_sun else 0.0
             rows.append({
                 "Date":          date,
@@ -24,8 +26,8 @@ def sales_data(n_stores=N_STORES, days=DAYS, seed=SEED):
                 "DayOfWeek":     dow,
                 "Open":          0 if is_sun else 1,
                 "Promo":         promo,
-                "StateHoliday":  "0",
-                "SchoolHoliday": 0,
+                "StateHoliday":  state_hol,
+                "SchoolHoliday": school_hol,
                 "Sales":         sales,
             })
 
