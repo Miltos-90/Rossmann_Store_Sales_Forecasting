@@ -127,7 +127,7 @@ def _generate_features(
     return result
 
 
-def lags(target: pd.Series, lags: list[pd.DateOffset]) -> pd.DataFrame:
+def lag_features(target: pd.Series, lags: list[pd.DateOffset]) -> pd.DataFrame:
     """ 
     Create lagged features for a given target series.
 
@@ -141,7 +141,7 @@ def lags(target: pd.Series, lags: list[pd.DateOffset]) -> pd.DataFrame:
     return _generate_features(target, items=lags, make_func=_make_lag)
 
 
-def diffs(target: pd.Series, diffs: list[pd.DateOffset], lag: pd.DateOffset) -> pd.DataFrame:
+def diff_features(target: pd.Series, diffs: list[pd.DateOffset], lag: pd.DateOffset) -> pd.DataFrame:
     """ 
     Create differenced features for a given target series.
     This function calculates the difference between the current value and the value at a specified lag (y[t]-y[t-lag]).
@@ -160,7 +160,7 @@ def diffs(target: pd.Series, diffs: list[pd.DateOffset], lag: pd.DateOffset) -> 
     return _generate_features(target, items=diffs, make_func=_make_diff, lag=lag)
 
 
-def rolling(target: pd.Series, windows: list[int], agg_func: str, lag: pd.DateOffset) -> pd.DataFrame:
+def rolling_features(target: pd.Series, windows: list[int], agg_func: str, lag: pd.DateOffset) -> pd.DataFrame:
     """ 
     Create rolling features for a given target series.
     This function calculates the rolling statistic (e.g., mean, sum, max, min) over a specified window size for the target series.
