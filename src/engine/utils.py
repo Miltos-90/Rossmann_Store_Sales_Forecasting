@@ -136,37 +136,6 @@ def log_trial_cv_results(
     )
 
 
-def overwrite_closed_sales(
-        sales: pd.Series,
-        mode: Literal['interpolate', 'zero'],
-        index_name: str = "Date"
-        ) -> pd.Series:
-    """ 
-    Re-interpolate sales for days when the store was closed (Sundays) with non-zero sales on adjacent days.
-
-    Args:
-        sales: Series indexed by ['Date', 'Store'].
-        mode: Method to handle closed days. 'interpolate' fills closed days with interpolated values based on adjacent days' sales, while 'zero' fills closed days with zeros.
-        index_name: Name of the index level representing the date.
-
-    Returns:
-        Series with same structure as input, but with 'Sales' re-interpolated for closed days.
-    """
-    is_closed = sales.index.get_level_values(index_name).day_name() == 'Sunday'
-    
-    if mode == 'interpolate':
-        sales.loc[is_closed] = np.nan
-        sales = (sales
-                 .unstack('Store')
-                 .interpolate(method='time')
-                 .stack('Store'))
-
-    elif mode == 'zero':
-        sales.loc[is_closed] = 0
-
-    return sales
-
-
 def _wide_to_long_predictions(s: pd.DataFrame) -> pd.Series:
     """ Convert wide-format predictions with MultiIndex (Date, Store) and columns for each day ahead
         to long-format predictions with MultiIndex (Date, Store, Forecast Date) and a single value column.
@@ -216,23 +185,3 @@ def retrieve_sales(s: pd.Series, index: pd.Index) -> pd.Series:
     s_index = index.droplevel("Date").swaplevel("Store")  # Map from (Date, Store) to (Store, Date) to align with original sales series index
     s_out = s.loc[s_index]
     return s_out
-
-
-def predict(booster: xgb.Booster, X_test: pd.DataFrame) -> pd.Series:
-    """ 
-    Generate predictions for the given test data using the provided XGBoost booster.
-
-    Args:
-        booster: Trained XGBoost booster.
-        X_test: Test features.
-
-    Returns:
-        Series with predictions.
-    """
-    test_dmatrix  = xgb.DMatrix(X_test, enable_categorical=True)
-    log_preds_raw = booster.predict(test_dmatrix)
-    log_preds = pd.DataFrame(data=log_preds_raw, index=X_test.index)
-    preds_long = _wide_to_long_predictions(log_preds)
-    preds = overwrite_closed_sales(preds_long, mode='zero', index_name="Forecast Date")
-    return preds
-
