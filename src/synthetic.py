@@ -1,25 +1,23 @@
 import numpy as np
 import pandas as pd
 
-DAYS     = 4000
-N_STORES = 3
 SEED     = 42
 
-def sales_data(n_stores=N_STORES, days=DAYS, seed=SEED):
+def sales_data(n_stores, days, seasonal_magnitude, base_magnitude, trend_magnitude, promo_magnitude, seed=SEED):
     dates    = pd.date_range("2013-01-01", periods=days, freq="D")
     rows = []
     rng  = np.random.default_rng(seed)
     for store_id in range(1, n_stores + 1):
-        base = 300 + store_id * 150          # stores differ in overall level
+        base = base_magnitude + store_id * base_magnitude * 0.25
         for date in dates:
             dow      = date.dayofweek + 1    # 1=Mon … 7=Sun
             is_sun   = dow == 7
-            seasonal = 20 * np.sin(2 * np.pi * (dow - 1) / 6)   # peak Wed
-            trend    = 0.5 * store_id * (date - dates[0]).days
-            promo    = int(rng.random() < 0.25)
+            seasonal = seasonal_magnitude * np.sin(2 * np.pi * (dow - 1) / 6)   # peak Wed
+            trend    = trend_magnitude * store_id * (date - dates[0]).days
+            promo    = promo_magnitude * int(rng.random() < 0.25)
             state_hol = "0" if rng.random() >= 0.1 else "a"  # 10% chance of state holiday
             school_hol = 1 if rng.random() < 0.15 else 0  # 15% chance of school holiday
-            sales    = max(0.0, base + seasonal + trend + promo * 100) if not is_sun else 0.0
+            sales    = max(0.0, base + seasonal + trend + promo) if not is_sun else 0.0
             rows.append({
                 "Date":          date,
                 "Store":         store_id,
@@ -35,7 +33,7 @@ def sales_data(n_stores=N_STORES, days=DAYS, seed=SEED):
 
     return train
 
-def store_data(n_stores=N_STORES):
+def store_data(n_stores):
 
     # Generate synthetic store data with some variability across stores
     stores = []

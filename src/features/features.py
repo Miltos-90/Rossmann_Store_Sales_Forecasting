@@ -33,14 +33,12 @@ def compute(
     Returns:
         pd.DataFrame: A DataFrame containing the generated features, indexed by and Date.
     """
-
-    day_lag = pd.DateOffset(days=1)  # We use this to shift the rolling windows and differences
-                                     # by one day to avoid data leakage from the current day.
+    
     features = [
         # Past features
         lag_features(df['Sales'], lags=lags),
-        diff_features(df['Sales'], diffs=diffs, lag=day_lag),
-        rolling_features(df['Sales'], windows=windows, agg_func='mean', lag=day_lag),
+        diff_features(df['Sales'], diffs=diffs),
+        rolling_features(df['Sales'], windows=windows, agg_func='mean'),
         # Future features
         calendar(df.index.to_series() + horizon),
         days_with_competition(df['CompetitionStartDate'], offset=horizon),

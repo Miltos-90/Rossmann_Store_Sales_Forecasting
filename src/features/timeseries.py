@@ -92,8 +92,7 @@ def _make_diff(s: pd.Series, diff: pd.DateOffset) -> pd.Series:
 def _generate_features(
     target: pd.Series, 
     items: List[Any], 
-    make_func: Callable[..., pd.Series], 
-    lag: Union[pd.DateOffset, None] = None,
+    make_func: Callable[..., pd.Series],
     **kwargs: Any
 ) -> pd.DataFrame:
     """
@@ -103,7 +102,6 @@ def _generate_features(
         target (pd.Series): The target series for which to create features. The index of the series should be a datetime index.
         items (List[Any]): A list of items to process.
         make_func (Callable[..., pd.Series]): A function that takes a series and an item from the items list and returns a new series with the generated feature.
-        lag (Union[pd.DateOffset, None], optional): A lag to apply to the target series before generating features. If None, no lag is applied. Defaults to None.
         **kwargs (Any): Additional keyword arguments to pass to the make_func.
 
     Returns:
@@ -113,11 +111,7 @@ def _generate_features(
 
     # Ensure chronological order
     processed_series = target.sort_index(ascending=True)
-    
-    # Conditionally apply lag shift if provided (make_lags passes None)
-    if lag is not None:
-        processed_series = processed_series.shift(freq=lag)
-        
+
     # Dynamically build the series list using the designated processor function
     features = [make_func(processed_series, item, **kwargs) for item in items]
     
@@ -141,7 +135,7 @@ def lag_features(target: pd.Series, lags: list[pd.DateOffset]) -> pd.DataFrame:
     return _generate_features(target, items=lags, make_func=_make_lag)
 
 
-def diff_features(target: pd.Series, diffs: list[pd.DateOffset], lag: pd.DateOffset) -> pd.DataFrame:
+def diff_features(target: pd.Series, diffs: list[pd.DateOffset]) -> pd.DataFrame:
     """ 
     Create differenced features for a given target series.
     This function calculates the difference between the current value and the value at a specified lag (y[t]-y[t-lag]).
@@ -151,16 +145,15 @@ def diff_features(target: pd.Series, diffs: list[pd.DateOffset], lag: pd.DateOff
     Args:
         target (pd.Series): The target series for which to create differenced features. The index of the series should be a datetime index.
         diffs (list[pd.DateOffset]): A list of pandas DateOffset objects representing the differences to create.
-        lag (pd.DateOffset): A pandas DateOffset object representing the lag to use for calculating the difference.
 
     Returns:
         pd.DataFrame: A DataFrame containing the differenced features, with each column named according to the 
         difference applied (e.g., 'diff_days_1', 'diff_days_2', etc.).
     """
-    return _generate_features(target, items=diffs, make_func=_make_diff, lag=lag)
+    return _generate_features(target, items=diffs, make_func=_make_diff)
 
 
-def rolling_features(target: pd.Series, windows: list[int], agg_func: str, lag: pd.DateOffset) -> pd.DataFrame:
+def rolling_features(target: pd.Series, windows: list[int], agg_func: str) -> pd.DataFrame:
     """ 
     Create rolling features for a given target series.
     This function calculates the rolling statistic (e.g., mean, sum, max, min) over a specified window size for the target series.
@@ -171,9 +164,8 @@ def rolling_features(target: pd.Series, windows: list[int], agg_func: str, lag: 
         target (pd.Series): The target series for which to create rolling features. The index of the series should be a datetime index.
         windows (list[int]): A list of integers representing the window sizes for the rolling statistic.
         agg_func (str): The aggregation function to apply over the rolling window. This can be any valid pandas aggregation function such as 'mean', 'sum', 'max', 'min', etc.
-        lag (pd.DateOffset): A pandas DateOffset object representing the lag to use for calculating the rolling statistic.
 
     Returns:
         pd.DataFrame: A DataFrame containing the rolling features, with each column named according to the window size and function applied (e.g., 'rolling_mean_3', 'rolling_sum_5', etc.).
     """
-    return _generate_features(target, items=windows, make_func=_make_rolling, lag=lag, func=agg_func)
+    return _generate_features(target, items=windows, make_func=_make_rolling, func=agg_func)
