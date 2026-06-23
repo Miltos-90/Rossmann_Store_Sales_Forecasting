@@ -7,7 +7,7 @@ supporting multi-index DataFrames and Series.
 import numpy as np
 import pandas as pd
 
-from typing import Any, Optional, Union, Tuple
+from typing import Optional, Union, Tuple
 from sklearn.base import BaseEstimator, TransformerMixin
 
 class TargetTransformer(BaseEstimator, TransformerMixin):
@@ -19,7 +19,7 @@ class TargetTransformer(BaseEstimator, TransformerMixin):
     by entities alongside a datetime index).
 
     Attributes:
-        forecast_horizon (Any): The frequency string or offset object used to 
+        forecast_horizon (pd.DateOffset): The frequency string or offset object used to 
             shift the time series (e.g., '1D', '7D', pd.Timedelta).
         anchor_col (str): The column name to use as an anchor when a DataFrame 
             is passed during fitting.
@@ -88,48 +88,48 @@ class TargetTransformer(BaseEstimator, TransformerMixin):
         return datetime_index, other_indexes
 
 
-    def _transform_multi_index(self, y: pd.Series, other_indexes: list, n_periods: int) -> pd.Series:
+    def _transform_multi_index(self, y: pd.Series, other_indexes: list) -> pd.Series:
         """ 
         Helper function to transform a multi-index Series by applying the differencing logic to each group defined by the other indexes.
 
         Args:
             y (pd.Series): The target time series to transform, with a MultiIndex.
             other_indexes (list): A list of index names that are not the datetime index, used for grouping.
-            n_periods (int): The number of periods to drop from the start of each group to account for the lagged features.
 
         Returns:
             pd.Series: The transformed Series with the same MultiIndex, where the differencing has been applied within each group defined by the other indexes.
         """
 
-        y_out = (
-                y.reset_index(other_indexes)
-                .groupby(other_indexes)
-                .apply(lambda x: x.shift(freq=self.forecast_horizon) - x, include_groups=False)
-                [y.name]
-                .dropna()
-        )
-        # Drop the first few rows that don't have enough history to compute the lagged features
-        y_out = y_out.groupby(other_indexes, group_keys=False).apply(lambda x: x.iloc[n_periods:])
+        # Step 2: Compute the target as the difference between the future value we want to predict and
+        # the current value, to make the series more stationary and easier for the model to learn.
+        y_out = (y
+                 .reset_index(other_indexes)
+                 .groupby(other_indexes)
+                 .apply(lambda x: x.shift(freq=self.forecast_horizon) - x, include_groups=False)
+                 [y.name]
+                 .dropna())
     
         return y_out
-    
-    def _transform_single_index(self, y: pd.Series, n_periods: int) -> pd.Series:
+
+    def _transform_single_index(self, y: pd.Series) -> pd.Series:
         """Helper function to transform a single-index Series by applying the differencing logic.
 
         Args:
             y (pd.Series): The target time series to transform, with a single datetime index.
-            n_periods (int): The number of periods to drop from the start to account for the lagged features.
 
         Returns:
             pd.Series: The transformed Series with the same index, where the differencing has been applied.
         """
+
+        # Step 2: Compute the target as the difference between the future value we want to predict
+        # and the current value, to make the series more stationary and easier for the model to learn.
         y_out = y.shift(freq=self.forecast_horizon) - y
+    
+        # Drop the few rows that don't have enough history to compute the lagged features
         y_out = y_out.dropna()
 
-        # Drop the first few rows that don't have enough history to compute the lagged features
-        y_out = y_out.iloc[n_periods:]
-
         return y_out
+
     def transform(self, y: pd.Series) -> pd.Series:
         """Computes the difference between future values and current values.
 
@@ -144,18 +144,19 @@ class TargetTransformer(BaseEstimator, TransformerMixin):
         Raises:
             ValueError: If no datetime-like index level is found in `y`.
         """
+
+        # Step 1: Log-transform the target to stabilize variance
+        y_log = np.log1p(y)
+
+        # Step 2: Compute the target as the difference between the future value we want to predict and
+        # the current value, to make the series more stationary and easier for the model to learn.
         _, other_indexes = self._group_indexes(y)
-
-        # Resolve integer period count for iloc (forecast_horizon is a DateOffset)
-        n_periods = abs(next(iter(self.forecast_horizon.kwds.values()), 0))
-
-        # Compute the target as the difference between the future value we want 
-        # to predict and the current value, to make the series more stationary 
-        # and easier for the model to learn.
         if other_indexes:
-            y_out = self._transform_multi_index(y, other_indexes, n_periods)
+            y_out = self._transform_multi_index(y_log, other_indexes)
         else:
-            y_out = self._transform_single_index(y, n_periods)
+            y_out = self._transform_single_index(y_log)
+
+        y_out.name = y.name
 
         return y_out
 
@@ -176,22 +177,37 @@ class TargetTransformer(BaseEstimator, TransformerMixin):
             raise ValueError("Fit the transformer first.")
 
         # Step 1: Inverse differencing via index matching with anchors
-        anchors = self.anchors_.loc[y_pred.index]
-        y_pred_log = anchors + y_pred
+        y_pred_log = self.anchors_.loc[y_pred.index] + y_pred
 
         # Step 2: Inverse log transformation (Note: assumed log1p scale based on expm1)
-        y_pred = np.expm1(y_pred_log)
+        y_pred_inversed = np.expm1(y_pred_log)
 
-        # Step 3: Zero out Sundays
-        
-        date_index_name, _ = self._group_indexes(y_pred)  # Fetch date index name to identify the datetime level for Sunday checks
+        # Step 3: Shift the index back to align with the original dates, using the forecast horizon.
+        date_index_name, _ = self._group_indexes(y_pred)  # Fetch date index name to identify the datetime level
         date_level_num = y_pred.index.names.index(date_index_name)  # Find the level number for the date index to use in set_levels
+        shifted_dates  = y_pred.index.levels[date_level_num].shift(freq=-self.forecast_horizon)
+        y_pred.index   = y_pred.index.set_levels(shifted_dates, level=date_level_num)
 
-        # Shift the index according to the forecast horizon to align with the original dates for Sunday checks
-        shifted_dates = y_pred.index.levels[date_level_num] - self.forecast_horizon
-        y_pred.index  = y_pred.index.set_levels(shifted_dates, level=date_level_num)
-        
+        # Ensure the name of the Series is preserved after inverse transformation
+        y_pred_inversed.name = y_pred.name
+
+        return y_pred_inversed
+    
+    def set_closed_to_zero(self, y_pred: pd.Series) -> pd.Series:
+        """Sets predictions for closed days (Sundays) to zero.
+
+        Args:
+            y_pred (pd.Series): The predicted values.
+
+        Returns:
+            pd.Series: The predictions with values for closed days set to zero.
+        """
+
+        date_index_name, _ = self._group_indexes(y_pred)  # Fetch date index name to identify the datetime level
         is_closed_preds = y_pred.index.get_level_values(date_index_name).day_name() == "Sunday"
         y_pred.loc[is_closed_preds] = 0.0
 
+        y_pred = y_pred.round(0).astype('int')
+
         return y_pred
+    

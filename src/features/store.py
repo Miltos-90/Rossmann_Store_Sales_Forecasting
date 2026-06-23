@@ -3,24 +3,6 @@ This module contains functions to create features related to store holidays and 
 dataset. It includes functions to calculate the number of days to the next holiday, days since the last holiday,
 days since competition started, and the number of consecutive promotion days. These features are essential for
 modeling the sales patterns influenced by holidays and promotions.
-
-NOTE ON OFFSET BEHAVIOR:
-Functions that accept an `offset` parameter (e.g., days_in_promotion, holiday_counters, days_with_competition) 
-look up values at the shifted date (d + offset) to align with a forecast horizon. This means:
-  - For each row at date d, the feature value reflects the state at d + offset
-  - Rows within `offset` distance from the end of observed data will have NaN values 
-    (since d + offset falls outside the available data range)
-
-Example with days_in_promotion and offset=2 days:
-    date  | promo | consecutive_block | lookup (d+offset) | feature_value
-    ------|-------|-------------------|--------------------|---------------
-    d1    | 0     | 0                 | d3 → 2             | 2
-    d2    | 1     | 1                 | d4 → 3             | 3
-    d3    | 1     | 2                 | d5 → 0             | 0
-    d4    | 1     | 3                 | d6 → 1             | 1
-    d5    | 0     | 0                 | d7 → 2             | 2
-    d6    | 1     | 1                 | d8 → NaN           | NaN        (future data not available)
-    d7    | 1     | 2                 | d9 → NaN           | NaN        (future data not available)
 """
 
 import pandas as pd
@@ -58,6 +40,7 @@ def _days_to_holiday(holiday_days: np.ndarray, dates_days: np.ndarray) -> np.nda
         holiday_days[idx_next.clip(max=len(holiday_days) - 1)] - dates_days,
         np.nan)
     return days_to_next_holiday
+
 
 def _days_since_holiday(holiday_days: np.ndarray, dates_days: np.ndarray) -> np.ndarray:
     """

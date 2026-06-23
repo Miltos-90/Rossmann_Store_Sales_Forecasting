@@ -1,5 +1,5 @@
 import pandas as pd
-
+import numpy as np
 
 def _date_from_week_year(row: pd.Series, year_col: str, week_col: str, day: int = 1) -> pd.Series:
     """
@@ -72,6 +72,7 @@ def process_store_data(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
+
 def drop_null_targets(X: pd.DataFrame, y: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     """ 
     Drop samples with null target values since they cannot be used for training or evaluation.
@@ -86,3 +87,99 @@ def drop_null_targets(X: pd.DataFrame, y: pd.DataFrame) -> tuple[pd.DataFrame, p
     non_null_targets = ~y.isnull()
     X, y = X[non_null_targets], y[non_null_targets]
     return X, y
+
+
+def preprocess_data(sales: pd.DataFrame, stores: pd.DataFrame) -> pd.DataFrame:
+    """
+    Preprocess the sales and store data for modeling.
+
+    Args:
+        sales (pd.DataFrame): The sales data.
+        stores (pd.DataFrame): The store data.
+
+    Returns:
+        pd.DataFrame: The preprocessed DataFrame ready for feature engineering.
+    """
+
+    # Compute the Promo2SinceDate and CompetitionStartDate columns from year/week and year/month
+    stores['Promo2SinceDate'] = stores.apply(_date_from_week_year,
+                                             args=('Promo2SinceYear', 'Promo2SinceWeek'),
+                                             axis=1)
+
+    stores['CompetitionStartDate'] = stores.apply(_date_from_week_year,
+                                                  args=('CompetitionOpenSinceYear', 'CompetitionOpenSinceMonth'),
+                                                  axis=1)
+
+    df = sales.merge(stores, on='Store', how='inner')
+    df['Date'] = pd.to_datetime(df['Date'])
+    df = df.sort_values(by=['Store', 'Date']) # Sort by Store and Date to ensure chronological order for feature engineering 
+
+    # Normalize the StateHoliday column to a boolean indicator for holidays and create a separate column for school holidays
+    no_state_holiday = df['StateHoliday'].isin(['0', 0]) | df['StateHoliday'].isna()
+    df.loc[no_state_holiday, 'StateHoliday'] = 'NoHoliday'
+
+    # Create boolean columns for state and school holidays
+    df['isStateHoliday'] = df['StateHoliday'] != 'NoHoliday'
+    df['isSchoolHoliday'] = df['SchoolHoliday'].astype(bool)
+
+    # Drop the original StateHoliday and SchoolHoliday columns since we now have boolean indicators
+    drop_cols = ['Promo2SinceYear', 'Promo2SinceWeek', 'StateHoliday', 'SchoolHoliday',
+                 'CompetitionOpenSinceYear', 'CompetitionOpenSinceMonth']
+
+    df.drop(columns=drop_cols, inplace=True)
+
+    return df
+
+
+def _is_closed_day(dates: pd.Series) -> pd.Series:
+    """
+    Determines if a given date is a closed day (Sunday) for the store.
+    
+    Parameters:
+    dates (pd.Series): The dates to check.
+
+    
+    Returns:
+    bool: True if the date is a closed day, False otherwise.
+    """
+    return dates.dt.day_name() == 'Sunday'
+
+
+def interpolate_closed_days(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Interpolates the 'Sales' values for closed days (Sundays) in the DataFrame.
+    
+    Parameters:
+    df (pd.DataFrame): DataFrame containing at least 'Date', 'Store', and 'Sales' columns.
+    
+    Returns:
+    pd.DataFrame: DataFrame with interpolated 'Sales' values for closed days.
+    """
+
+    df.loc[_is_closed_day(df['Date']), 'Sales'] = np.nan
+
+    # 2. We sort by Date inside the groupby to ensure linear interpolation happens chronologically
+    df['Sales'] = (df
+                   .groupby('Store', group_keys=False)
+                   .apply(lambda group: group.sort_values('Date').interpolate(method='linear'))
+                   ['Sales'] # Isolate the interpolated sales
+                   .round(0) # Round to nearest integer since sales are whole numbers
+                   .astype('int'))
+
+    return df
+
+
+def set_closed_to_zero(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Overwrites the 'Sales' values for closed days (Sundays) in the DataFrame with zeros.
+
+    Parameters:
+    df (pd.DataFrame): DataFrame containing at least 'Date' and 'Sales' columns.
+
+    Returns:
+    pd.DataFrame: DataFrame with 'Sales' values set to zero for closed days.
+    """
+    df.loc[_is_closed_day(df['Date']), 'Sales'] = 0
+    df['Sales'] = df['Sales'].round(0).astype('int') # Ensure Sales is integer type after setting to zero
+
+    return df

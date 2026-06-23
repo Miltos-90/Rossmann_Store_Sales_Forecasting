@@ -7,6 +7,7 @@ DataFrame with the generated features ready for modeling.
 """
 
 import pandas as pd
+import numpy as np
 
 from typing import List
 
@@ -33,12 +34,14 @@ def compute(
     Returns:
         pd.DataFrame: A DataFrame containing the generated features, indexed by and Date.
     """
-    
+
+    log_sales = np.log1p(df['Sales'])  # Log-transform the sales to stabilize variance
+
     features = [
         # Past features
-        lag_features(df['Sales'], lags=lags),
-        diff_features(df['Sales'], diffs=diffs),
-        rolling_features(df['Sales'], windows=windows, agg_func='mean'),
+        lag_features(log_sales, lags=lags),
+        diff_features(log_sales, diffs=diffs),
+        rolling_features(log_sales, windows=windows, agg_func='mean'),
         # Future features
         calendar(df.index.to_series() + horizon),
         days_with_competition(df['CompetitionStartDate'], offset=horizon),
