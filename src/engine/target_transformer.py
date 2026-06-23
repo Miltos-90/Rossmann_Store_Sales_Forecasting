@@ -190,17 +190,15 @@ class TargetTransformer(BaseEstimator, TransformerMixin):
         y_inv = np.expm1(y_log)
 
         # Step 3: Shift the index to get the date of the forecasted values
-        y_shifted = y_inv.copy()
-        dt_index, _ = self._group_indexes(y_shifted)
-        idx_df = y_shifted.index.to_frame()  # 1. Convert index to a DataFrame (preserves exact row order and length)
-        idx_df[dt_index] = idx_df[dt_index] - self.forecast_horizon  # 2. Shift the specific date column row-by-row 
-        y_shifted.index = pd.MultiIndex.from_frame(idx_df)  # 3. Safely rebuild the MultiIndex from the modified frame
+        y_shift = y_inv.copy()
+        idx_df  = self._shift_index(y_shift)
+        y_shift.index = pd.MultiIndex.from_frame(idx_df)
 
         # Step 4: Force predictions for Sundays to be 0
-        y_shifted.loc[self._is_sunday(y_shifted)] = 0.0
+        y_shift.loc[self._is_sunday(y_shift)] = 0.0
 
         # Step 5: Round predictions to the nearest integer and convert to int type
-        y_out = y_shifted.round(0).astype('int')
+        y_out = y_shift.round(0).astype('int')
         y_out.name = y.name
 
         return y_out
@@ -217,3 +215,17 @@ class TargetTransformer(BaseEstimator, TransformerMixin):
         dt_index, _ = self._group_indexes(y)
         is_sunday = y.index.get_level_values(dt_index).day_name() == "Sunday"
         return is_sunday
+    
+    def _shift_index(self, y: pd.Series) -> pd.DataFrame:
+        """Shifts the index of the Series by the forecast horizon.
+
+        Args:
+            y (pd.Series): The Series whose index will be shifted.
+
+        Returns:
+            pd.DataFrame: A DataFrame representing the shifted index.
+        """
+        dt_index, _ = self._group_indexes(y)
+        idx_df = y.index.to_frame()  # Convert index to a DataFrame
+        idx_df[dt_index] = idx_df[dt_index] - self.forecast_horizon  # Shift the specific date column
+        return idx_df
