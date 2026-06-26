@@ -16,10 +16,18 @@ class TimeSeriesCV(BaseCrossValidator):
     Splits are defined on the *Date* level of a ``(Date, Store)`` MultiIndex
     so that every store is present in both the train and test set of each fold.
 
-    Each fold has a fixed ``train_size``-day training window immediately
-    followed by a ``test_size``-day test window.  The windows slide forward
-    in non-overlapping steps of ``test_size`` days.  Fold 1 is the earliest
-    and fold ``n_splits`` is the latest (anchored to the end of the dataset).
+    Each fold has a fixed ``train_size``-day training window followed by a
+    ``test_size``-day test window, optionally separated by a ``gap``-day
+    embargo.  The windows slide forward in non-overlapping steps of
+    ``test_size`` days.  Fold 1 is the earliest and fold ``n_splits`` is the
+    latest (anchored to the end of the dataset).
+
+    The ``gap`` embargo drops the last ``gap`` dates immediately before each
+    test window from training.  This prevents leakage when the target is
+    forward-looking (e.g. a difference or value over a forecast horizon):
+    without a gap, the last ``horizon`` training rows would carry labels
+    built from observations that fall inside the test window.  Set
+    ``gap = forecast_horizon`` to remove that overlap.
 
     Parameters
     ----------
@@ -30,10 +38,14 @@ class TimeSeriesCV(BaseCrossValidator):
     test_size : int
         Number of days in each test window per store.  Also the step between consecutive
         folds.
+    gap : int, default 0
+        Number of days to drop between the end of the training window and the
+        start of the test window (embargo).  Use the forecast horizon to avoid
+        forward-looking target leakage.
 
     Examples
     --------
-    >>> cv = TimeSeriesCV(n_splits=3, train_size=180, test_size=7)
+    >>> cv = TimeSeriesCV(n_splits=3, train_size=180, test_size=7, gap=7)
     >>> for train_idx, test_idx in cv.split(X):
     ...     X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
     """
@@ -43,6 +55,7 @@ class TimeSeriesCV(BaseCrossValidator):
         n_splits: int,
         train_size: int,
         test_size: int,
+        gap: int = 0,
     ) -> None:
         """ Initialize the cross-validator. """
         if n_splits < 1:
@@ -51,9 +64,12 @@ class TimeSeriesCV(BaseCrossValidator):
             raise ValueError(f"train_size must be >= 1, got {train_size}")
         if test_size < 1:
             raise ValueError(f"test_size must be >= 1, got {test_size}")
+        if gap < 0:
+            raise ValueError(f"gap must be >= 0, got {gap}")
         self.n_splits   = n_splits
         self.train_size = train_size
         self.test_size  = test_size
+        self.gap        = gap
 
 
     def split(
@@ -90,9 +106,19 @@ class TimeSeriesCV(BaseCrossValidator):
             test_start_date = dates[test_start_pos]
             test_end_date   = dates[test_end_pos]
 
-            # Train window: fixed train_size days immediately before the test window
-            train_end_pos   = test_start_pos - 1
+            # Train window: fixed train_size days ending `gap` days before the test
+            # window. The gap embargoes the last `gap` dates so forward-looking
+            # targets cannot peek into the test set.
+            train_end_pos   = test_start_pos - 1 - self.gap
             train_start_pos = train_end_pos - self.train_size + 1
+
+            if train_start_pos < 0:
+                raise ValueError(
+                    f"Not enough dates for fold {fold}/{self.n_splits}: need "
+                    f"train_size={self.train_size} + gap={self.gap} + "
+                    f"{self.n_splits} x test_size={self.test_size} dates, but only "
+                    f"{n_dates} unique dates are available."
+                )
 
             train_start_date = dates[train_start_pos]
             train_end_date   = dates[train_end_pos]

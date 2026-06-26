@@ -41,7 +41,6 @@ def _suggest_params(trial: Trial, hyperparameters: dict) -> dict[str, Any]:
         params[name] = suggest_fn(name, low, high, **kwargs)
     return params
 
-
 def _objective(
     trial: Trial,
     X: np.ndarray,
@@ -138,7 +137,6 @@ def refit(
                         dtrain=dmatrix)
 
     return booster
-
 
 def optimize(study_name: str, X_train: pd.DataFrame, y_train: pd.Series, config: dict) -> None:
     """ 
