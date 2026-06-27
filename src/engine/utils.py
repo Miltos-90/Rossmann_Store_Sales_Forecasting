@@ -185,3 +185,53 @@ def retrieve_sales(s: pd.Series, index: pd.Index) -> pd.Series:
     s_index = index.droplevel("Date").swaplevel("Store")  # Map from (Date, Store) to (Store, Date) to align with original sales series index
     s_out = s.loc[s_index]
     return s_out
+
+
+def calculate_nested_cv_sizes(
+    total_days: int,
+    forecast_horizon: int,
+    n_outer_splits: int,
+    n_inner_splits: int,
+) -> dict:
+    """
+    Compute sliding-window sizes for nested time-series CV.
+
+    Formulas (gap = forecast_horizon = H, test sizes fixed to H):
+        outer_train_size = N - H * (K_out + 1)
+        inner_train_size = N - H * (K_out + K_in + 2)
+        outer_test_size  = H
+        inner_test_size  = H
+
+    Validity: N > h * (K_out + K_in + 2)
+
+    Args: 
+        total_days: Total number of days in the dataset for one store (N).
+        forecast_horizon: Forecast horizon in days (H).
+        n_outer_splits: Number of outer CV splits (K_out).
+        n_inner_splits: Number of inner CV splits (K_in).
+    """
+
+    # Rename variables for clarity in formulas
+    n     = total_days
+    h     = forecast_horizon
+    k_out = n_outer_splits
+    k_in  = n_inner_splits
+
+    outer_train_size = n - h * (k_out + 1)
+    inner_train_size = n - h * (k_out + k_in + 2)
+
+    min_days = h * (k_out + k_in + 2) + 1
+    if inner_train_size <= 0:
+        raise ValueError(
+            f"Dataset too small: {n} days available, "
+            f"at least {min_days} required for a 1-day inner training window."
+        )
+
+    config = {
+        "outer_train_size": outer_train_size,
+        "outer_test_size":  h,
+        "inner_train_size": inner_train_size,
+        "inner_test_size":  h,
+    }
+
+    return config

@@ -194,27 +194,11 @@ class TargetTransformer(BaseEstimator, TransformerMixin):
         idx_df  = self._shift_index(y_shift)
         y_shift.index = pd.MultiIndex.from_frame(idx_df)
 
-        # Step 4: Force predictions for Sundays to be 0
-        y_shift.loc[self._is_sunday(y_shift)] = 0.0
-
         # Step 5: Round predictions to the nearest integer and convert to int type
         y_out = y_shift.round(0).astype('int')
         y_out.name = y.name
 
         return y_out
-
-    def _is_sunday(self, y: pd.Series) -> pd.Series:
-        """Checks if the index of the Series corresponds to Sundays.
-
-        Args:
-            y (pd.Series): The Series whose index will be checked.
-
-        Returns:
-            pd.Series: A boolean Series indicating whether each index corresponds to a Sunday.
-        """
-        dt_index, _ = self._group_indexes(y)
-        is_sunday = y.index.get_level_values(dt_index).day_name() == "Sunday"
-        return is_sunday
     
     def _shift_index(self, y: pd.Series) -> pd.DataFrame:
         """Shifts the index of the Series by the forecast horizon.

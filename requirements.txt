@@ -7,3 +7,4 @@ scikit-learn==1.8.0
 xgboost==3.0.5
 optuna==4.8.0
 optuna-integration[xgboost]==4.8.0
+holidays==0.99

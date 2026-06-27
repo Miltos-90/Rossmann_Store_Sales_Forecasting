@@ -1,4 +1,4 @@
-"""Nested time-series cross-validation with hyperopt using the native XGBoost API."""
+""" Nested time-series cross-validation with hyperopt using the native XGBoost API. """
 
 import logging
 import optuna
@@ -62,7 +62,7 @@ def _objective(
         y: Target vector (n_samples,).
         cv: Time-series cross-validation splitter.
         study_name: Name of the Optuna study, used for organizing artifacts.
-        study_config: Optuna study settings (see nested_cv for key descriptions).
+        study_config: Optuna study settings (see optimize for key descriptions).
 
     Returns:
         Mean CV metric value (MAE or configured eval_metric) from the final boosting round.
@@ -76,8 +76,6 @@ def _objective(
         xgb.callback.EvaluationMonitor(show_stdv=True, period=study_config["monitor_periods"]),
         xgb.callback.EarlyStopping(rounds=study_config["early_stopping_rounds"]),
         XGBoostPruningCallback(trial, observation_key=f"test-{metric}"),
-        # The observation_key in the pruning callback reads from XGBoost's internal evals_log
-        # dict (keyed as "test-<metric>") - not from the final DataFrame column names ("test-<metric>-mean").
         booster_collector,
     ]
 
@@ -128,9 +126,8 @@ def refit(
     Returns:
         Trained XGBoost booster fitted on the entire outer fold training set with the best hyperparameters.
     """
-    xgb_constants = config["xgb_constants"]
     num_boost_round = best_trial.user_attrs['best_n_rounds']
-    params = {**xgb_constants, **best_trial.params}
+    params  = {**config["xgb_constants"], **best_trial.params}
     dmatrix = xgb.DMatrix(X,  label=y,  enable_categorical=True)
     booster = xgb.train(params=params,
                         num_boost_round=num_boost_round,
@@ -152,10 +149,14 @@ def optimize(study_name: str, X_train: pd.DataFrame, y_train: pd.Series, config:
         None
     """
 
+    # New pipeline: TimeSeriesCV is now built with (n_splits, train_size, test_size, gap).
+    # The `gap` embargo (defaults to 0) prevents forward-looking target leakage between
+    # the inner train and test windows; set it to the forecast horizon.
     inner_cv = TimeSeriesCV(n_splits=config["n_inner_splits"],
-                            horizon=config["forecast_horizon"],
-                            train_size=config["inner_train_size"])
-    
+                            train_size=config["inner_train_size"],
+                            test_size=config["inner_test_size"],
+                            gap=config["forecast_horizon"])
+
     pruner = MedianPruner(n_startup_trials=config["n_startup_trials"])
 
     sampler = TPESampler(seed=config["seed"])
