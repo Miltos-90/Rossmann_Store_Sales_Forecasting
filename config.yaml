@@ -1,15 +1,14 @@
-paths:
+path:
   data_dir: ../datasets/rossmann-store-sales
   log_dir: ./artifacts
-  # Derived paths below are optional — omit them to auto-compute from data_dir / log_dir
-  # store_file: ../datasets/rossmann-store-sales/store.csv
-  # train_file: ../datasets/rossmann-store-sales/train.csv
-  # log_file: ./artifacts/hypertuning.log
-  # storage_url: sqlite:///./artifacts/hypertuning.db
+  stores: store.csv
+  train: train.csv
+  logs: hypertuning.log
+  storage_url: sqlite:///./artifacts/hypertuning.db
 
-training:
-  forecast_horizon: 10
-  roll_windows:
+feature_engineering:
+  horizon: 10
+  windows:
     - "7D"
     - "14D"
     - "30D"
@@ -22,7 +21,7 @@ training:
     months: [2, 3, 4, 5, 6]
     years: [1]
 
-cv:
+cross_validation:
   n_outer_splits: 5
   n_inner_splits: 3
 
@@ -36,7 +35,7 @@ hypertuning:
   num_boost_rounds: 10000
   refit_val_fraction: 0.1
 
-xgb:
+model_constants:
   tree_method: hist
   device: cpu
   objective: reg:squarederror
