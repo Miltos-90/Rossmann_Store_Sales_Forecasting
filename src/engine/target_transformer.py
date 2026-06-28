@@ -56,6 +56,8 @@ class TargetTransformer(BaseEstimator, TransformerMixin):
             self.anchors_ = X[self.anchor_col]
         elif y is not None:
             self.anchors_ = y
+        else:
+            raise ValueError("No anchor values found. Please provide either a Series, or a DataFrame with the specified anchor column.")
         return self
 
     def _group_indexes(self, y: pd.Series) -> Tuple[str, list]:

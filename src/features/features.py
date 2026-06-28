@@ -24,9 +24,9 @@ def compute(
     """ 
     Generate features for the sales stores dataset. This includes both past features (lags, differences, rolling means)
     and future features (calendar, competition, holidays, promotions) aligned with the forecast horizon.
-    
+
     Args:
-        df (pd.DataFrame): The input DataFrame containing sales and store information, indexed by Date 
+        df (pd.DataFrame): The input DataFrame containing sales and store information, indexed by Dateand a column named 'Sales'.
         lags (List[pd.DateOffset]): A list of lag periods to use for generating lag features.
         diffs (List[pd.DateOffset]): A list of difference periods to use for generating difference features.
         windows (List[str]): A list of window sizes to use for generating rolling mean features.

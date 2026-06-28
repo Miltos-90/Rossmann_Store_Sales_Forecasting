@@ -2,14 +2,17 @@
 
 import logging
 import os
+from typing import Any
 import optuna
 import numpy as np
 import pandas as pd
+
 import xgboost as xgb
-from typing import Literal
 
 from optuna.study import Study
 from optuna.trial import Trial
+from .target_transformer import TargetTransformer
+
 
 logger = logging.getLogger(__name__)
 
@@ -116,17 +119,17 @@ def log_trial_cv_results(
         history: DataFrame containing CV results for each boosting round,
             with columns like 'test-{metric}-mean' and 'test-{metric}-std'.
     """
-    test_mean_col = f"test-{metric}-mean"
-    test_std_col  = f"test-{metric}-std"
-    final_loss      = history[test_mean_col].values[-1]
-    final_loss_std  = history[test_std_col].values[-1] if test_std_col in history.columns else float("nan")
-    best_loss       = history[test_mean_col].min()
-    best_n_rounds = int(history[test_mean_col].idxmin()) + 1  # 1-based
+    test_mean_col  = f"test-{metric}-mean"
+    test_std_col   = f"test-{metric}-std"
+    final_loss     = history[test_mean_col].values[-1]
+    final_loss_std = history[test_std_col].values[-1] if test_std_col in history.columns else float("nan")
+    best_loss      = history[test_mean_col].min()
+    best_n_rounds  = int(history[test_mean_col].idxmin()) + 1  # 1-based
 
-    trial.set_user_attr("best_n_rounds",      best_n_rounds)
-    trial.set_user_attr("final_loss_mean",    float(final_loss))
-    trial.set_user_attr("final_loss_std",     float(final_loss_std))
-    trial.set_user_attr("best_loss_mean",     float(best_loss))
+    trial.set_user_attr("best_n_rounds",   best_n_rounds)
+    trial.set_user_attr("final_loss_mean", float(final_loss))
+    trial.set_user_attr("final_loss_std",  float(final_loss_std))
+    trial.set_user_attr("best_loss_mean",  float(best_loss))
 
     logger.debug(
         f"Trial {trial.number} | CV finished — "
@@ -187,7 +190,7 @@ def retrieve_sales(s: pd.Series, index: pd.Index) -> pd.Series:
     return s_out
 
 
-def calculate_nested_cv_sizes(
+def compute_cv_sizes(
     total_days: int,
     forecast_horizon: int,
     n_outer_splits: int,
@@ -235,3 +238,57 @@ def calculate_nested_cv_sizes(
     }
 
     return config
+
+
+def predict(X: pd.DataFrame, booster: xgb.Booster, transformer: TargetTransformer):
+    """ 
+    Predict sales using a trained XGBoost booster and inverse transform the predictions.
+
+    Args:
+        X (pd.DataFrame): Feature matrix for prediction.
+        booster (xgb.Booster): Trained XGBoost booster.
+        transformer (TargetTransformer): Transformer to inverse transform the predictions.
+
+    Returns:
+        pd.Series: Predicted sales values.
+    """
+
+    test_dmatrix = xgb.DMatrix(X, enable_categorical=True)
+    preds_raw = booster.predict(test_dmatrix)
+    preds = pd.Series(data=preds_raw, index=X.index, name='Sales')
+    preds = transformer.inverse_transform(preds)
+
+    return preds
+
+
+def refit(
+    X: pd.DataFrame,
+    y: pd.Series,
+    best_trial: optuna.trial.FrozenTrial,
+    config: dict[str, Any],
+) -> xgb.Booster:
+    """ 
+    Refit XGBoost model on the entire outer fold training set using the best hyperparameters found in the inner loop.
+
+    A temporal validation split (last val_fraction of the training rows) is used
+    with early stopping so that the optimal boosting rounds re-calibrate to the
+    larger outer-fold dataset rather than being fixed at the inner-CV value.
+
+    Args:
+        X: Training features for the outer fold.
+        y: Training targets for the outer fold.
+        best_trial: Optuna trial object containing the best hyperparameters from the inner loop.
+        config: Dictionary containing either the flat XGBoost constants dict directly,
+            or a study config dict with an "xgb_constants" key.
+
+    Returns:
+        Trained XGBoost booster fitted on the entire outer fold training set with the best hyperparameters.
+    """
+    num_boost_round = best_trial.user_attrs['best_n_rounds']
+    params  = {**config["xgb_constants"], **best_trial.params}
+    dmatrix = xgb.DMatrix(X,  label=y,  enable_categorical=True)
+    booster = xgb.train(params=params,
+                        num_boost_round=num_boost_round,
+                        dtrain=dmatrix)
+
+    return booster

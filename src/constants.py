@@ -3,7 +3,6 @@ import os
 import numpy as np
 from pandas.tseries.offsets import DateOffset
 
-
 # Paths and file names
 DATA_DIR = '../datasets/rossmann-store-sales'
 STORE_FILE = os.path.join(DATA_DIR, 'store.csv')
@@ -14,29 +13,25 @@ LOG_FILE = os.path.join(LOG_DIR, "hypertuning.log")
 STORAGE_URL = f"sqlite:///{os.path.join(LOG_DIR, 'hypertuning.db')}"
 
 # Training settings
+FORECAST_HORIZON = 10 # of days ahead to predict
+ROLL_WINDOWS = ['7D', '14D', '30D', '60D']
+DIFFS = [DateOffset(days=d) for d in np.arange(1, 7).tolist() + [14, 30]]
 LAGS = (
-    [DateOffset(days=d) for d in np.arange(1, 7)] + 
-    [DateOffset(weeks=w) for w in np.arange(1, 4)] + 
-    [DateOffset(months=m) for m in np.arange(1, 4)] +
+    [DateOffset(days=d) for d in np.arange(0, 15)] + 
+    [DateOffset(weeks=w) for w in [3, 4]] + 
+    [DateOffset(months=m) for m in np.arange(2, 7)] +
     [DateOffset(years=1)]
 )
-
-DIFFS = [DateOffset(days=d) for d in np.arange(1, 7)]
-
-ROLL_WINDOWS = { 7: [DateOffset(days=1)], 30: [DateOffset(days=1)], 90: [DateOffset(days=1)]}
-
-
-FORECAST_HORIZON = 10 # of days ahead to predict
 
 # CV settings
 N_OUTER_SPLITS   = 5
 N_INNER_SPLITS   = 3
 
 # Hyperparameter tuning settings
-NUM_TRIALS              = 5#100 # number of Optuna trials for hyperparameter tuning in each outer CV split
+NUM_TRIALS              = 100 # number of Optuna trials for hyperparameter tuning in each outer CV split
 SEED                    = 42 # random seed for reproducibility
 MONITOR_PERIODS         = 100 # number of CV rounds to report in pruning callback
-NUM_STARTUP_TRIALS      = 3#5 # Pruning is disabled until the given number of trials finish in the same study. After that, pruning is enabled for all subsequent trials.
+NUM_STARTUP_TRIALS      = 5 # Pruning is disabled until the given number of trials finish in the same study. After that, pruning is enabled for all subsequent trials.
 NUM_JOBS                = -1 # number of parallel jobs for Optuna.  Set to -1 to use all available cores.
 EARLY_STOPPING_ROUNDS   = 10 # Number of rounds with no improvement after which training will be stopped.  Set to None to disable early stopping.
 NUM_BOOST_ROUNDS        = 10000 # Maximum number of boosting rounds to train.  Early stopping may cause training to stop before this number is reached.

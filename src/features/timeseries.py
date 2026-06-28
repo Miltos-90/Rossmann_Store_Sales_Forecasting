@@ -114,7 +114,22 @@ def _generate_features(
 
     # Dynamically build the series list using the designated processor function
     features = [make_func(processed_series, item, **kwargs) for item in items]
-    
+
+    # Variable-frequency DateOffsets (months, years) apply calendar arithmetic when
+    # shifting the index, which can map multiple distinct source dates to the same
+    # target date. For example:
+    #   - DateOffset(months=1): both Aug 30 and Aug 31 shift to Sep 30, because
+    #     September only has 30 days.
+    #   - DateOffset(years=1): both Feb 28 and Feb 29 of a leap year shift to
+    #     Feb 28 of the following (non-leap) year.
+    # This leaves the shifted Series with duplicate index labels. pd.concat(..., axis=1)
+    # then calls .reindex() on each Series to align them to the combined index, and
+    # pandas raises ValueError: cannot reindex on an axis with duplicate labels
+    # Keeping the last occurrence (the most recent original date that maps to a given
+    # shifted date) is the safest default, as it corresponds to the freshest observation
+    # available for that calendar slot.
+    features = [f[~f.index.duplicated(keep='last')] for f in features]
+
     # Concatenate and realign to original target index
     result = pd.concat(features, axis=1).reindex(target.index)
 

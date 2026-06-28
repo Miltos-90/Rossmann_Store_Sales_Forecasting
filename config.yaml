@@ -1,0 +1,86 @@
+paths:
+  data_dir: ../datasets/rossmann-store-sales
+  log_dir: ./artifacts
+  # Derived paths below are optional — omit them to auto-compute from data_dir / log_dir
+  # store_file: ../datasets/rossmann-store-sales/store.csv
+  # train_file: ../datasets/rossmann-store-sales/train.csv
+  # log_file: ./artifacts/hypertuning.log
+  # storage_url: sqlite:///./artifacts/hypertuning.db
+
+training:
+  forecast_horizon: 10
+  roll_windows:
+    - "7D"
+    - "14D"
+    - "30D"
+    - "60D"
+  diffs:
+    days: [1, 2, 3, 4, 5, 6, 14, 30]
+  lags:
+    days: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+    weeks: [3, 4]
+    months: [2, 3, 4, 5, 6]
+    years: [1]
+
+cv:
+  n_outer_splits: 5
+  n_inner_splits: 3
+
+hypertuning:
+  num_trials: 100
+  seed: 42
+  monitor_periods: 100
+  num_startup_trials: 5
+  num_jobs: -1
+  early_stopping_rounds: 10
+  num_boost_rounds: 10000
+  refit_val_fraction: 0.1
+
+xgb:
+  tree_method: hist
+  device: cpu
+  objective: reg:squarederror
+  eval_metric: rmse
+  verbosity: 0
+
+hyperparameters:
+  max_depth:
+    method: suggest_int
+    low: 3
+    high: 10
+    log: false
+  learning_rate:
+    method: suggest_float
+    low: 1.0e-3
+    high: 0.3
+    log: true
+  subsample:
+    method: suggest_float
+    low: 0.6
+    high: 1.0
+    log: false
+  colsample_bytree:
+    method: suggest_float
+    low: 0.6
+    high: 1.0
+    log: false
+  min_child_weight:
+    method: suggest_int
+    low: 1
+    high: 20
+    log: false
+  reg_alpha:
+    method: suggest_float
+    low: 1.0e-3
+    high: 1.0
+    log: true
+  reg_lambda:
+    method: suggest_float
+    low: 1.0e-3
+    high: 5.0
+    log: true
+  gamma:
+    method: suggest_float
+    low: 0.0
+    high: 2.0
+    log: false

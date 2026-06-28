@@ -103,38 +103,6 @@ def _objective(
 
     return history[f"test-{metric}-mean"].min()
 
-def refit(
-    X: pd.DataFrame,
-    y: pd.DataFrame,
-    best_trial: optuna.trial.FrozenTrial,
-    config: dict[str, Any],
-) -> xgb.Booster:
-    """ 
-    Refit XGBoost model on the entire outer fold training set using the best hyperparameters found in the inner loop.
-
-    A temporal validation split (last val_fraction of the training rows) is used
-    with early stopping so that the optimal boosting rounds re-calibrate to the
-    larger outer-fold dataset rather than being fixed at the inner-CV value.
-
-    Args:
-        X: Training features for the outer fold.
-        y: Training targets for the outer fold.
-        best_trial: Optuna trial object containing the best hyperparameters from the inner loop.
-        config: Dictionary containing either the flat XGBoost constants dict directly,
-            or a study config dict with an "xgb_constants" key.
-
-    Returns:
-        Trained XGBoost booster fitted on the entire outer fold training set with the best hyperparameters.
-    """
-    num_boost_round = best_trial.user_attrs['best_n_rounds']
-    params  = {**config["xgb_constants"], **best_trial.params}
-    dmatrix = xgb.DMatrix(X,  label=y,  enable_categorical=True)
-    booster = xgb.train(params=params,
-                        num_boost_round=num_boost_round,
-                        dtrain=dmatrix)
-
-    return booster
-
 def optimize(study_name: str, X_train: pd.DataFrame, y_train: pd.Series, config: dict) -> None:
     """ 
     Optimize hyperparameters using Optuna with nested cross-validation.
@@ -149,9 +117,6 @@ def optimize(study_name: str, X_train: pd.DataFrame, y_train: pd.Series, config:
         None
     """
 
-    # New pipeline: TimeSeriesCV is now built with (n_splits, train_size, test_size, gap).
-    # The `gap` embargo (defaults to 0) prevents forward-looking target leakage between
-    # the inner train and test windows; set it to the forecast horizon.
     inner_cv = TimeSeriesCV(n_splits=config["n_inner_splits"],
                             train_size=config["inner_train_size"],
                             test_size=config["inner_test_size"],
