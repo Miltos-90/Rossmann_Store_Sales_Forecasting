@@ -6,8 +6,9 @@ path:
   logs: hypertuning.log
   storage_url: sqlite:///./artifacts/hypertuning.db
 
+horizon: 10  # Forecast horizon in days
+
 feature_engineering:
-  horizon: 10
   windows:
     - "7D"
     - "14D"
@@ -16,20 +17,20 @@ feature_engineering:
   diffs:
     days: [1, 2, 3, 4, 5, 6, 14, 30]
   lags:
-    days: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+    days: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]  # 0-lag is the current day, 1-lag is yesterday, etc.
     weeks: [3, 4]
     months: [2, 3, 4, 5, 6]
     years: [1]
 
 cross_validation:
-  n_outer_splits: 5
-  n_inner_splits: 3
+  n_outer_splits: 2 #5
+  n_inner_splits: 2 #3
 
 hypertuning:
-  num_trials: 100
+  num_trials: 3 #100
   seed: 42
   monitor_periods: 100
-  num_startup_trials: 5
+  num_startup_trials: 1 # 5
   num_jobs: -1
   early_stopping_rounds: 10
   num_boost_rounds: 10000

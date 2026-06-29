@@ -17,6 +17,11 @@ from pydantic import (
 from . import validators
 
 
+# Define valid hyperparameter suggestion methods
+_VALID_SUGGEST_METHODS = {"suggest_int", "suggest_float", "suggest_categorical"}
+
+
+
 # ---------- Annotated Types ----------
 PositiveInt   = Annotated[int, AfterValidator(validators.positive_int)]
 Offset        = Annotated[pd.DateOffset, AfterValidator(validators.positive_offset)]
@@ -82,21 +87,9 @@ class PathSettings(BaseModel):
 
 class FeatureEngineeringSettings(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    horizon: HorizonOffset
     windows: list[str]
     diffs:   OffsetList
     lags:    OffsetList
-
-    # Convert horizon from int to DayOffset if it's provided as an integer
-    @field_validator("horizon", mode="before")
-    @classmethod
-    def _convert_horizon(cls, v: int | pd.DateOffset) -> pd.DateOffset:
-        """ 
-        Convert the horizon from an integer to a DayOffset if it's provided as an integer.
-        """
-        if isinstance(v, int):
-            return pd.DateOffset(days=v)
-        return v
 
 
 class CVSettings(BaseModel):
@@ -144,8 +137,6 @@ class XGBSettings(BaseModel):
         return v
 
 
-# Define valid hyperparameter suggestion methods
-_VALID_SUGGEST_METHODS = {"suggest_int", "suggest_float", "suggest_categorical"}
 
 class HyperparameterSpec(BaseModel):
     method: str
@@ -169,6 +160,7 @@ class HyperparameterSpec(BaseModel):
 
 class AppSettings(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
+    horizon:             HorizonOffset
     path:                PathSettings
     cross_validation:    CVSettings
     feature_engineering: FeatureEngineeringSettings

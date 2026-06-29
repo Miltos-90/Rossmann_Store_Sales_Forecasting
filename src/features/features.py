@@ -11,26 +11,22 @@ import numpy as np
 
 from typing import List
 
-from .calendar import calendar
-from .timeseries import lag_features, diff_features, rolling_features
-from .store import holiday_counters, days_with_competition, days_in_promotion
+from src.settings import FeatureEngineeringSettings
+from src.features.calendar import calendar
+from src.features.timeseries import lag_features, diff_features, rolling_features
+from src.features.store import holiday_counters, days_with_competition, days_in_promotion
 
-def compute(
-        df: pd.DataFrame,
-        lags: List[pd.DateOffset],
-        diffs: List[pd.DateOffset],
-        windows: List[str],
-        horizon: pd.DateOffset) -> pd.DataFrame:
+def compute(df: pd.DataFrame, 
+            config: FeatureEngineeringSettings, 
+            horizon: pd.DateOffset) -> pd.DataFrame:
     """ 
     Generate features for the sales stores dataset. This includes both past features (lags, differences, rolling means)
     and future features (calendar, competition, holidays, promotions) aligned with the forecast horizon.
 
     Args:
         df (pd.DataFrame): The input DataFrame containing sales and store information, indexed by Dateand a column named 'Sales'.
-        lags (List[pd.DateOffset]): A list of lag periods to use for generating lag features.
-        diffs (List[pd.DateOffset]): A list of difference periods to use for generating difference features.
-        windows (List[str]): A list of window sizes to use for generating rolling mean features.
-        horizon (pd.DateOffset): The forecast horizon as a DateOffset.
+        config (FeatureEngineeringSettings): The configuration settings for feature engineering, including lags, diffs, windows, and horizon.
+        horizon (pd.DateOffset): The forecast horizon for aligning future features.
     Returns:
         pd.DataFrame: A DataFrame containing the generated features, indexed by and Date.
     """
@@ -39,9 +35,9 @@ def compute(
 
     features = [
         # Past features
-        lag_features(log_sales, lags=lags),
-        diff_features(log_sales, diffs=diffs),
-        rolling_features(log_sales, windows=windows, agg_func='mean'),
+        lag_features(log_sales, lags=config.lags),
+        diff_features(log_sales, diffs=config.diffs),
+        rolling_features(log_sales, windows=config.windows, agg_func='mean'),
         # Future features
         calendar(df.index.to_series() + horizon),
         days_with_competition(df['CompetitionStartDate'], offset=horizon),

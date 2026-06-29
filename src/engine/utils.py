@@ -11,8 +11,9 @@ import xgboost as xgb
 
 from optuna.study import Study
 from optuna.trial import Trial
-from .target_transformer import TargetTransformer
 
+from src.engine.target_transformer import TargetTransformer
+from src.settings import CVSettings, XGBSettings
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,8 @@ def log_study(study: Study) -> None:
         study: A completed (or partial) Optuna study.
     """
     trials = study.trials
+
+    # Compute summary statistics
     n_total   = len(trials)
     n_complete = sum(t.state == optuna.trial.TrialState.COMPLETE for t in trials)
     n_pruned   = sum(t.state == optuna.trial.TrialState.PRUNED   for t in trials)
@@ -82,21 +85,21 @@ def log_study(study: Study) -> None:
         "pct_pruned": round(p_pruned, 1),
         "n_failed":   n_failed,
     }
-
-    if durations:
-        summary["duration_total_s"] = round(sum(durations), 1)
-        summary["duration_mean_s"]  = round(float(np.mean(durations)), 2)
-        summary["duration_max_s"]   = round(float(max(durations)), 2)
-
-    if complete_values:
-        summary["best_value"]   = round(float(min(complete_values)), 6)
-        summary["worst_value"]  = round(float(max(complete_values)), 6)
-        summary["median_value"] = round(float(np.median(complete_values)), 6)
+    
+    # Compute duration and value statistics
+    summary["duration_total_s"] = round(sum(durations), 1)
+    summary["duration_mean_s"]  = round(float(np.mean(durations)), 2)
+    summary["duration_max_s"]   = round(float(max(durations)), 2)
+  
+    summary["best_value"]   = round(float(min(complete_values)), 6)
+    summary["worst_value"]  = round(float(max(complete_values)), 6)
+    summary["median_value"] = round(float(np.median(complete_values)), 6)
 
     best_trial = study.best_trial
     summary["best_trial_number"] = best_trial.number
-    summary["best_trial_params"] = best_trial.params  # already a dict of JSON-serializable primitives
+    summary["best_trial_params"] = best_trial.params
 
+    # Store the summary as a study-level user attribute
     study.set_user_attr("summary", summary)
     logger.info("Study '%s' summary persisted to Optuna DB.", study.study_name)
 
@@ -193,8 +196,7 @@ def retrieve_sales(s: pd.Series, index: pd.Index) -> pd.Series:
 def compute_cv_sizes(
     total_days: int,
     forecast_horizon: int,
-    n_outer_splits: int,
-    n_inner_splits: int,
+    cv_config: CVSettings,
 ) -> dict:
     """
     Compute sliding-window sizes for nested time-series CV.
@@ -210,15 +212,14 @@ def compute_cv_sizes(
     Args: 
         total_days: Total number of days in the dataset for one store (N).
         forecast_horizon: Forecast horizon in days (H).
-        n_outer_splits: Number of outer CV splits (K_out).
-        n_inner_splits: Number of inner CV splits (K_in).
+        cv_config: Cross-validation settings containing the number of outer and inner splits.
     """
 
     # Rename variables for clarity in formulas
     n     = total_days
     h     = forecast_horizon
-    k_out = n_outer_splits
-    k_in  = n_inner_splits
+    k_out = cv_config.n_outer_splits
+    k_in  = cv_config.n_inner_splits
 
     outer_train_size = n - h * (k_out + 1)
     inner_train_size = n - h * (k_out + k_in + 2)
@@ -231,10 +232,10 @@ def compute_cv_sizes(
         )
 
     config = {
-        "outer_train_size": outer_train_size,
-        "outer_test_size":  h,
-        "inner_train_size": inner_train_size,
-        "inner_test_size":  h,
+        "outer_train": outer_train_size,
+        "inner_train": inner_train_size,
+        "outer_test":  h,
+        "inner_test":  h,
     }
 
     return config
@@ -265,7 +266,7 @@ def refit(
     X: pd.DataFrame,
     y: pd.Series,
     best_trial: optuna.trial.FrozenTrial,
-    config: dict[str, Any],
+    config: XGBSettings,
 ) -> xgb.Booster:
     """ 
     Refit XGBoost model on the entire outer fold training set using the best hyperparameters found in the inner loop.
@@ -278,15 +279,14 @@ def refit(
         X: Training features for the outer fold.
         y: Training targets for the outer fold.
         best_trial: Optuna trial object containing the best hyperparameters from the inner loop.
-        config: Dictionary containing either the flat XGBoost constants dict directly,
-            or a study config dict with an "xgb_constants" key.
+        config: XGBSettings object containing the XGBoost constants.
 
     Returns:
         Trained XGBoost booster fitted on the entire outer fold training set with the best hyperparameters.
     """
     num_boost_round = best_trial.user_attrs['best_n_rounds']
-    params  = {**config["xgb_constants"], **best_trial.params}
-    dmatrix = xgb.DMatrix(X,  label=y,  enable_categorical=True)
+    params  = {**config.model_dump(), **best_trial.params}
+    dmatrix = xgb.DMatrix(X, label=y, enable_categorical=True)
     booster = xgb.train(params=params,
                         num_boost_round=num_boost_round,
                         dtrain=dmatrix)

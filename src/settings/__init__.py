@@ -1,1 +1,3 @@
-from .models import AppSettings
+from .models import (
+    AppSettings, FeatureEngineeringSettings, CVSettings, XGBSettings
+)
