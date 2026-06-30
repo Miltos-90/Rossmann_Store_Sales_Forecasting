@@ -9,8 +9,6 @@ DataFrame with the generated features ready for modeling.
 import pandas as pd
 import numpy as np
 
-from typing import List
-
 from src.settings import FeatureEngineeringSettings
 from src.features.calendar import calendar
 from src.features.timeseries import lag_features, diff_features, rolling_features
@@ -34,11 +32,11 @@ def compute(df: pd.DataFrame,
     log_sales = np.log1p(df['Sales'])  # Log-transform the sales to stabilize variance
 
     features = [
-        # Past features
+        # Past features - these are aligned with the current date as they depend on past data
         lag_features(log_sales, lags=config.lags),
         diff_features(log_sales, diffs=config.diffs),
         rolling_features(log_sales, windows=config.windows, agg_func='mean'),
-        # Future features
+        # Future features - these are aligned with the forecast horizon date as they are known in advance
         calendar(df.index.to_series() + horizon),
         days_with_competition(df['CompetitionStartDate'], offset=horizon),
         holiday_counters(df['isStateHoliday'], offset=horizon),

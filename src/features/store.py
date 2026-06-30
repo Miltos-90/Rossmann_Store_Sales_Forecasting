@@ -62,7 +62,7 @@ def _days_since_holiday(holiday_days: np.ndarray, dates_days: np.ndarray) -> np.
     return days_since_last_holiday
 
 
-def holiday_counters(group: pd.Series, offset: pd.DateOffset = pd.DateOffset(0)) -> pd.DataFrame:
+def holiday_counters(group: pd.Series, offset: pd.DateOffset) -> pd.DataFrame:
     """ 
     Calculate holiday-related features for a given group of dates.
 
@@ -76,10 +76,14 @@ def holiday_counters(group: pd.Series, offset: pd.DateOffset = pd.DateOffset(0))
     group_sorted = group.sort_index()
     is_holiday = group_sorted == True
     holiday_days = _dates_to_days(group_sorted.index[is_holiday])
-    lookup_days  = _dates_to_days(group_sorted.index + offset)  # shift only the lookup dates
+
+    # Shift the lookup dates by the specified offset to align with the forecast horizon, i.e.
+    # if the forecast horizon is 7 days, we want to know how many days to the next holiday 
+    # in 7 days from now - at the forecast date.
+    lookup_days  = _dates_to_days(group_sorted.index + offset)
 
     if len(holiday_days) > 0:
-        days_to_next   = _days_to_holiday(holiday_days, lookup_days)
+        days_to_next    = _days_to_holiday(holiday_days, lookup_days)
         days_since_last = _days_since_holiday(holiday_days, lookup_days)
     else:
         days_to_next = np.full(len(group), np.nan)  # Array filled with NaN values
@@ -103,8 +107,12 @@ def days_with_competition(competition_since_date: pd.Series, offset: pd.DateOffs
         pd.Series: A pandas Series with the number of days since the competition started, with NaN for dates before the competition started.
     """
     s = competition_since_date.sort_index()
-    dates = s.index.to_series() + offset
-    res = (dates - s).dt.days
+
+    # Shift the lookup dates by the specified offset to align with the forecast horizon, i.e.
+    # if the forecast horizon is 7 days, we want to know how many days since competition started 
+    # in 7 days from now - at the forecast date.
+    lookup_dates = s.index.to_series() + offset
+    res = (lookup_dates - s).dt.days
     res = res.where(res >= 0, np.nan)
     res.name = 'CompetitionDaysSinceStart'
 
@@ -112,7 +120,7 @@ def days_with_competition(competition_since_date: pd.Series, offset: pd.DateOffs
     return res
     
 
-def days_in_promotion(s: pd.Series, offset: pd.DateOffset = pd.DateOffset(0)) -> pd.Series:
+def days_in_promotion(s: pd.Series, offset: pd.DateOffset) -> pd.Series:
     """ Calculate the number of consecutive promotions for each date in the series.
     
     Args:
@@ -135,9 +143,11 @@ def days_in_promotion(s: pd.Series, offset: pd.DateOffset = pd.DateOffset(0)) ->
     # Group by the blocks and calculate the cumulative sum
     consecutive_block = is_promo_active.groupby(block_id).cumsum()
 
-    # Look up the consecutive count at (index + offset) and restore original index
-    lookup_index = s_sorted.index + offset
-    result = consecutive_block.reindex(lookup_index)
+    # Offset the lookup dates by the specified offset to align with the forecast horizon
+    # i.e. if the forecast horizon is 7 days, we want to know how many consecutive promotions 
+    # there will be in 7 days from now - at the forecast date.
+    lookup_dates = s_sorted.index + offset
+    result = consecutive_block.reindex(lookup_dates)
     result.index = s_sorted.index
 
     # Reorder the result to match the original order of the input series
