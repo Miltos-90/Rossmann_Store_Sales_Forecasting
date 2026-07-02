@@ -87,9 +87,10 @@ class PathSettings(BaseModel):
 
 class FeatureEngineeringSettings(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    windows: list[str]
-    diffs:   OffsetList
-    lags:    OffsetList
+    windows:  list[str]
+    diffs:    OffsetList
+    lags:     OffsetList
+    holidays: dict[str, float]
 
 
 class CVSettings(BaseModel):

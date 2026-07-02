@@ -39,7 +39,7 @@ def compute(df: pd.DataFrame,
         # Future features - these are aligned with the forecast horizon date as they are known in advance
         calendar(df.index.to_series() + horizon),
         days_with_competition(df['CompetitionStartDate'], offset=horizon),
-        holiday_counters(df['isStateHoliday'], offset=horizon),
+        holiday_counters(df['isStateHoliday'], offset=horizon, sigma=config.holidays["sigma"]),
         days_in_promotion(df['Promo'], offset=horizon),
         days_in_promotion(df['Promo2'], offset=horizon)
     ]

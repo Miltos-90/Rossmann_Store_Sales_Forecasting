@@ -62,36 +62,47 @@ def _days_since_holiday(holiday_days: np.ndarray, dates_days: np.ndarray) -> np.
     return days_since_last_holiday
 
 
-def holiday_counters(group: pd.Series, offset: pd.DateOffset) -> pd.DataFrame:
+def holiday_counters(group: pd.Series, offset: pd.DateOffset, sigma: float) -> pd.DataFrame:
     """ 
     Calculate holiday-related features for a given group of dates.
 
     Args:
         group (pd.Series): A pandas Series with boolean values indicating holidays.
         offset (pd.DateOffset): A pandas DateOffset object representing the forecast horizon.
+        sigma (float): Standard deviation for the Gaussian function used in the holiday wave calculation.
 
     Returns:
         pd.DataFrame: A DataFrame with columns 'DaysToNextHoliday' and 'DaysSinceLastHoliday'.
     """
+
     group_sorted = group.sort_index()
-    is_holiday = group_sorted == True
+    is_holiday   = group_sorted == True
     holiday_days = _dates_to_days(group_sorted.index[is_holiday])
 
-    # Shift the lookup dates by the specified offset to align with the forecast horizon, i.e.
-    # if the forecast horizon is 7 days, we want to know how many days to the next holiday 
-    # in 7 days from now - at the forecast date.
-    lookup_days  = _dates_to_days(group_sorted.index + offset)
+    # Shift the lookup dates by the forecast horizon to compute days to next and since last holiday
+    # from those dates. This is important because we want to know how many days until the next holiday 
+    # and how many days since the last holiday, relative to the forecast horizon, not the current date.
+    lookup_days = _dates_to_days(group_sorted.index + offset)  # shift only the lookup dates
 
     if len(holiday_days) > 0:
         days_to_next    = _days_to_holiday(holiday_days, lookup_days)
         days_since_last = _days_since_holiday(holiday_days, lookup_days)
     else:
-        days_to_next = np.full(len(group), np.nan)  # Array filled with NaN values
+        # Arrays filled with NaN values
+        days_to_next    = np.full(len(group), np.nan)
         days_since_last = np.full(len(group), np.nan)
 
-    res = pd.DataFrame(data=np.stack([days_to_next, days_since_last], axis=-1),
+    # Compute the Gaussian holiday wave effect based on the days to next and since last holiday.
+    denom = 2 * sigma ** 2  # Denominator for the Gaussian function
+    post_holiday_wave = np.exp(- days_since_last ** 2 / denom)
+    pre_holiday_wave  = np.exp(- days_to_next ** 2 / denom)
+
+    waves = np.stack([pre_holiday_wave, post_holiday_wave], axis=-1).astype(np.float32)
+
+    res = pd.DataFrame(data=waves,
                        index=group_sorted.index,
-                       columns=['DaysToNextHoliday', 'DaysSinceLastHoliday'])
+                       columns=['pre_holiday_wave', 'post_holiday_wave'])
+
 
     return res.reindex(group.index)
 
@@ -114,7 +125,7 @@ def days_with_competition(competition_since_date: pd.Series, offset: pd.DateOffs
     lookup_dates = s.index.to_series() + offset
     res = (lookup_dates - s).dt.days
     res = res.where(res >= 0, np.nan)
-    res.name = 'CompetitionDaysSinceStart'
+    res.name = 'competition_days_since_start'
 
     res = res.reindex(competition_since_date.index)  # Ensure the result is aligned with the original index
     return res
