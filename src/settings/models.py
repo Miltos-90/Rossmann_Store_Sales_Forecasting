@@ -7,7 +7,7 @@ import yaml
 import pandas as pd
 
 from pathlib import Path
-from typing import List
+from typing import List, Any
 from typing_extensions import Annotated
 from pydantic import (
     BaseModel, ConfigDict, AfterValidator, BeforeValidator,
@@ -90,7 +90,7 @@ class FeatureEngineeringSettings(BaseModel):
     windows:  list[str]
     diffs:    OffsetList
     lags:     OffsetList
-    holidays: dict[str, float]
+    holidays: dict[str, Any]
 
 
 class CVSettings(BaseModel):

@@ -23,6 +23,8 @@ feature_engineering:
     years: [1]
   holidays:
     sigma: 4.0  # Standard deviation for the Gaussian function used in the holiday wave calculation.
+    country: DE  # Country code for holidays (Germany in this case).
+    language: en_US  # Language in which the holiday names will be returned.
 
 cross_validation:
   n_outer_splits: 2 #5
