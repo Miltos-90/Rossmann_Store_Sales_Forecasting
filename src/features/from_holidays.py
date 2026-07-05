@@ -265,12 +265,12 @@ def holiday_waves(group: pd.Series, offset: pd.DateOffset, sigma: float) -> pd.D
 
     group_sorted = group.sort_index()
     is_holiday   = group_sorted == True
-    holiday_days = _dates_to_days(group_sorted.index[is_holiday])
+    holiday_days = _dates_to_days(group_sorted.index[is_holiday])  # Get dates of holidays in the group as days since epoch
 
     # Shift the lookup dates by the forecast horizon to compute days to next and since last holiday
     # from those dates. This is important because we want to know how many days until the next holiday 
-    # and how many days since the last holiday, relative to the forecast horizon, not the current date.
-    lookup_days = _dates_to_days(group_sorted.index + offset)  # shift only the lookup dates
+    # and how many days since the last holiday relative to the forecast horizon, not the current date.
+    lookup_days = _dates_to_days(group_sorted.index + offset)  # Get the lookup dates as days since epoch with the offset applied
 
     if len(holiday_days) > 0:
         days_to_next    = _days_to_holiday(holiday_days, lookup_days)
