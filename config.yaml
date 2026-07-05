@@ -22,7 +22,7 @@ feature_engineering:
     months: [2, 3, 4, 5, 6]
     years: [1]
   holidays:
-    sigma: 4.0        # Standard deviation for the Gaussian function used in the holiday wave calculation. 
+    sigma: 1.3        # Standard deviation for the Gaussian function used in the holiday wave calculation. 
                       # Sigma is the 60% memory mark: the day before/after the holiday where the holiday 
                       # effect drops to roughly 60% of its maximum strength.
     country: DE       # Country code to extract holidays (Germany in this case) - we use the holidays package.
