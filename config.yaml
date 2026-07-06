@@ -25,6 +25,9 @@ feature_engineering:
     sigma: 1.3        # Standard deviation for the Gaussian function used in the holiday wave calculation. 
                       # Sigma is the 60% memory mark: the day before/after the holiday where the holiday 
                       # effect drops to roughly 60% of its maximum strength.
+    extension_devs: 3 # Number of standard deviations to extend the holiday effect beyond the holiday date. 
+                      # For example, if sigma=1.3 and extension_devs=3, the holiday effect will be considered 
+                      # for days within 3*1.3 = 3.9 days before and after the holiday.
     country: DE       # Country code to extract holidays (Germany in this case) - we use the holidays package.
     language: en_US   # Language in which the holiday names will be returned - we use the holidays package.
 

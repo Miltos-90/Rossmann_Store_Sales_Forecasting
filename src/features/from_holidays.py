@@ -197,13 +197,13 @@ def subdivision(holiday_df: pd.Series, country: str, language: str, index_name: 
     return most_likely_subdivision
 
 
-def holiday_names(
+def names(
         dates: pd.Series, 
         country: str,
         subdivision: str,
         language: str,
         offset: pd.DateOffset
-        ) -> pd.DataFrame:
+        ) -> pd.Series:
     """
     Get holidays for a specific store based on its subdivision and the given dates.
 
@@ -217,8 +217,8 @@ def holiday_names(
                                 indexed by the original dates.
 
     Returns:
-        pd.DataFrame: A DataFrame containing the holiday names for each date in the list.
-                      Columns include the index_name and 'holiday_name'.
+        pd.Series: A Series containing the holiday names for each date in the list.
+                    The index is the original dates, and the values are the holiday names.
     """
 
     # Shift the lookup dates by the forecast horizon to determine which holiday falls
@@ -235,22 +235,20 @@ def holiday_names(
                                           years=years_in_dset,
                                           index_name=dates.name)
 
-    # Dataframe with a single column "holiday_name" that contains 
-    # the holiday name for each date in the group.
-    holiday_df = (holiday_df
+    # Series with the holiday name for each date in the group.
+    holiday_s = (holiday_df
                   .set_index(dates.name)
                   ['name']
                   .reindex(lookup_dates)
                   .set_axis(dates)
-                  .rename("holiday_name")
-                  .to_frame())
+                  .rename("holiday_name"))
     
-    holiday_df.index.name = dates.name  # Set the index name for clarity
+    holiday_s.name = "holiday_name"
+    
+    return holiday_s
 
-    return holiday_df
 
-
-def holiday_waves(group: pd.Series, offset: pd.DateOffset, sigma: float) -> pd.DataFrame:
+def waves(group: pd.Series, offset: pd.DateOffset, sigma: float) -> pd.DataFrame:
     """ 
     Calculate holiday-related features for a given group of dates.
 
@@ -293,3 +291,46 @@ def holiday_waves(group: pd.Series, offset: pd.DateOffset, sigma: float) -> pd.D
                        columns=['pre_holiday_wave', 'post_holiday_wave'])
 
     return res.reindex(group.index)
+
+
+def names_extended(
+        pre_wave: pd.Series,
+        post_wave: pd.Series,
+        hol_names: pd.Series,
+        stddev: float) -> pd.Series:
+    """
+    Extend the holiday name to all dates where waves are non-zero (not just the exact holiday date).
+    We extend back in time for pre_wave and forward in time for post_wave up
+    to the specified number of standard deviations.
+
+    Args:
+        pre_wave (pd.Series): A series representing the pre-holiday wave values.
+        post_wave (pd.Series): A series representing the post-holiday wave values.
+        hol_names (pd.Series): A series containing the names of holidays.
+        stddev (float): The number of standard deviations to consider for extending the holiday names.
+
+    Returns:
+        pd.Series: A series with the extended holiday names, where the holiday name is assigned to all dates
+                   within the specified number of standard deviations before and after the holiday.
+    """
+
+    # At +-stddev, the Gaussian evaluates to exp(-stddev²/2)
+    threshold = np.exp(-0.5 * stddev ** 2)
+
+    pre_active  = pre_wave  >= threshold   # within stddev before an upcoming holiday
+    post_active = post_wave >= threshold   # within stddev after a past holiday
+
+    extended_name = pd.Series(
+        np.where(
+            pre_active | post_active,
+            np.where(pre_wave >= post_wave,
+                     hol_names.bfill(),   # approaching holiday → look forward for the name
+                     hol_names.ffill()),   # receding holiday  → look backward for the name
+            None
+        ),
+        index=hol_names.index,
+        dtype=object
+    )
+    extended_name.name = hol_names.name
+
+    return extended_name

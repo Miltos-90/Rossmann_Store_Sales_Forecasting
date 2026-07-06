@@ -10,10 +10,8 @@ import pandas as pd
 import numpy as np
 
 from src.settings import FeatureEngineeringSettings
-from src.features.from_calendar import calendar
-from src.features.from_target import lag_features, diff_features, rolling_features
-from src.features.from_store import days_with_competition, days_in_promotion
-from src.features.from_holidays import holiday_waves, subdivision, holiday_names
+from src.features import from_target, from_holidays, from_store, from_calendar
+
 
 def compute(df: pd.DataFrame, 
             config: FeatureEngineeringSettings, 
@@ -32,31 +30,51 @@ def compute(df: pd.DataFrame,
         pd.DataFrame: A DataFrame containing the generated features, indexed by 'Date'.
     """
 
-    log_sales = np.log1p(df['Sales'])  # Log-transform the sales to stabilize variance
+    
+    # Past features - these are aligned with the current date as they depend on past data
+    log_sales        = np.log1p(df['Sales'])  # Log-transform the sales to stabilize variance
+    lag_features     = from_target.lag(log_sales, lags=config.lags)
+    diff_features    = from_target.diff(log_sales, diffs=config.diffs)
+    rolling_features = from_target.rolling(log_sales, windows=config.windows, agg_func='mean')
 
-    # This returns a string, so we will add it to the features dataframe at the end.
-    subdiv = subdivision(df['isStateHoliday'].reset_index(),
+    # Future features - these are aligned with the forecast horizon date as they are known in advance
+
+    # The subdivision function returns a string, so we will add it to the features dataframe at the end.
+    subdiv = from_holidays.subdivision(df['isStateHoliday'].reset_index(),
                          country=config.holidays["country"],
                          language=config.holidays["language"],
                          index_name=df.index.name)  # Determine the subdivision based on holiday data
 
-    features = [
-        # Past features - these are aligned with the current date as they depend on past data
-        lag_features(log_sales, lags=config.lags),
-        diff_features(log_sales, diffs=config.diffs),
-        rolling_features(log_sales, windows=config.windows, agg_func='mean'),
+    h_waves = from_holidays.waves(df['isStateHoliday'], offset=horizon, sigma=config.holidays["sigma"])
 
-        # Future features - these are aligned with the forecast horizon date as they are known in advance
-        calendar(df.index.to_series() + horizon),
-        days_with_competition(df['CompetitionStartDate'], offset=horizon),
-        holiday_waves(df['isStateHoliday'], offset=horizon, sigma=config.holidays["sigma"]),
-        holiday_names(df.index.to_series(),
-                      country=config.holidays["country"],
-                      language=config.holidays["language"],
-                      subdivision=subdiv,
-                      offset=horizon),
-        days_in_promotion(df['Promo'], offset=horizon),
-        days_in_promotion(df['Promo2'], offset=horizon)
+    h_names = from_holidays.names(df.index.to_series(),
+                                  country=config.holidays["country"],
+                                  language=config.holidays["language"],
+                                  subdivision=subdiv,
+                                  offset=horizon)
+    
+    hnames_ext = from_holidays.names_extended(h_waves['pre_holiday_wave'],
+                                              h_waves['post_holiday_wave'],
+                                              h_names,
+                                              stddev=config.holidays["extension_devs"])
+    
+    calendar    = from_calendar.calendar(df.index.to_series() + horizon)
+    competition = from_store.days_with_competition(df['CompetitionStartDate'], offset=horizon)
+    promo       = from_store.days_in_promotion(df['Promo'], offset=horizon)
+    promo2      = from_store.days_in_promotion(df['Promo2'], offset=horizon)
+
+    features = [
+        # Past features
+        lag_features,
+        diff_features,
+        rolling_features,
+        # Future features
+        calendar,
+        h_waves,
+        hnames_ext,
+        competition,
+        promo,
+        promo2
     ]
 
     features_df = pd.concat(features, axis=1)

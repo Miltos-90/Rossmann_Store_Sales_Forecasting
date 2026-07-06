@@ -7,7 +7,7 @@ supporting multi-index DataFrames and Series.
 import numpy as np
 import pandas as pd
 
-from typing import Any, Optional, Union, Tuple
+from typing import Optional, Union, Tuple
 from sklearn.base import BaseEstimator, TransformerMixin
 
 class TargetTransformer(BaseEstimator, TransformerMixin):
