@@ -90,7 +90,5 @@ class LogEvalCallback(xgb.callback.TrainingCallback):
         if "test" in evals_log and self.metric in evals_log["test"]:
             mean, std = evals_log["test"][self.metric][-1]
             if (epoch + 1) % self.period == 0:
-                logger.info(
-                    f"Iter {epoch+1}: test-{self.metric}-mean={mean:.6f}, std={std:.6f}"
-                )
+                logger.info(f"Iter {epoch+1}: test-{self.metric}-mean={mean:.6f}, std={std:.6f}")
         return False

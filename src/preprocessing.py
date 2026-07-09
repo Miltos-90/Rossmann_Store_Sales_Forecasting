@@ -1,5 +1,5 @@
 import pandas as pd
-
+import numpy as np
 
 def _date_from_week_year(row: pd.Series, year_col: str, week_col: str, day: int = 1) -> pd.Series:
     """
@@ -72,6 +72,7 @@ def process_store_data(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
+
 def drop_null_targets(X: pd.DataFrame, y: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     """ 
     Drop samples with null target values since they cannot be used for training or evaluation.
@@ -83,5 +84,48 @@ def drop_null_targets(X: pd.DataFrame, y: pd.DataFrame) -> tuple[pd.DataFrame, p
     Returns:
         tuple[pd.DataFrame, pd.Series]: Filtered X and y with null target samples removed
     """
-    non_null_targets = ~y.isnull().any(axis=1)
-    return X[non_null_targets], y[non_null_targets]
+    non_null_targets = ~y.isnull()
+    X, y = X[non_null_targets], y[non_null_targets]
+    return X, y
+
+
+def preprocess_data(sales: pd.DataFrame, stores: pd.DataFrame) -> pd.DataFrame:
+    """
+    Preprocess the sales and store data for modeling.
+
+    Args:
+        sales (pd.DataFrame): The sales data.
+        stores (pd.DataFrame): The store data.
+
+    Returns:
+        pd.DataFrame: The preprocessed DataFrame ready for feature engineering.
+    """
+
+    # Compute the Promo2SinceDate and CompetitionStartDate columns from year/week and year/month
+    stores['Promo2SinceDate'] = stores.apply(_date_from_week_year,
+                                             args=('Promo2SinceYear', 'Promo2SinceWeek'),
+                                             axis=1)
+
+    stores['CompetitionStartDate'] = stores.apply(_date_from_week_year,
+                                                  args=('CompetitionOpenSinceYear', 'CompetitionOpenSinceMonth'),
+                                                  axis=1)
+
+    df = sales.merge(stores, on='Store', how='inner')
+    df['Date'] = pd.to_datetime(df['Date'])
+    df = df.sort_values(by=['Store', 'Date']) # Sort by Store and Date to ensure chronological order for feature engineering 
+
+    # Normalize the StateHoliday column to a boolean indicator for holidays and create a separate column for school holidays
+    no_state_holiday = df['StateHoliday'].isin(['0', 0]) | df['StateHoliday'].isna()
+    df.loc[no_state_holiday, 'StateHoliday'] = 'NoHoliday'
+
+    # Create boolean columns for state and school holidays
+    df['isStateHoliday'] = df['StateHoliday'] != 'NoHoliday'
+    df['isSchoolHoliday'] = df['SchoolHoliday'].astype(bool)
+
+    # Drop the original StateHoliday and SchoolHoliday columns since we now have boolean indicators
+    drop_cols = ['Promo2SinceYear', 'Promo2SinceWeek', 'StateHoliday', 'SchoolHoliday',
+                 'CompetitionOpenSinceYear', 'CompetitionOpenSinceMonth']
+
+    df.drop(columns=drop_cols, inplace=True)
+
+    return df

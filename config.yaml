@@ -1,0 +1,95 @@
+path:
+  data_dir: ../datasets/rossmann-store-sales
+  log_dir: ./artifacts
+  stores: store.csv
+  train: train.csv
+  logs: hypertuning.log
+  storage_url: sqlite:///./artifacts/hypertuning.db
+
+horizon: 10  # Forecast horizon in days
+
+feature_engineering:
+  windows:  # Rolling windows for feature engineering
+    - "7D"
+    - "14D"
+    - "30D"
+    - "60D"
+  diffs:
+    days: [1, 2, 3, 4, 5, 6, 14, 30]
+  lags:
+    days: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]  # 0-lag is the current day, 1-lag is yesterday, etc.
+    weeks: [3, 4]
+    months: [2, 3, 4, 5, 6]
+    years: [1]
+  holidays:
+    sigma: 1.3        # Standard deviation for the Gaussian function used in the holiday wave calculation. 
+                      # Sigma is the 60% memory mark: the day before/after the holiday where the holiday 
+                      # effect drops to roughly 60% of its maximum strength.
+    extension_devs: 3 # Number of standard deviations to extend the holiday effect beyond the holiday date. 
+                      # For example, if sigma=1.3 and extension_devs=3, the holiday effect will be considered 
+                      # for days within 3*1.3 = 3.9 days before and after the holiday.
+    country: DE       # Country code to extract holidays (Germany in this case) - we use the holidays package.
+    language: en_US   # Language in which the holiday names will be returned - we use the holidays package.
+
+cross_validation:
+  n_outer_splits: 2 #5
+  n_inner_splits: 2 #3
+
+hypertuning:
+  num_trials: 3 #100
+  seed: 42
+  monitor_periods: 100
+  num_startup_trials: 1 # 5
+  num_jobs: -1
+  early_stopping_rounds: 10
+  num_boost_rounds: 10000
+  refit_val_fraction: 0.1
+
+model_constants:
+  tree_method: hist
+  device: cpu
+  objective: reg:squarederror
+  eval_metric: rmse
+  verbosity: 0
+
+hyperparameters:  # XGBoost hyperparameters to be tuned using Optuna
+  max_depth:
+    method: suggest_int
+    low: 3
+    high: 10
+    log: false
+  learning_rate:
+    method: suggest_float
+    low: 1.0e-3
+    high: 0.3
+    log: true
+  subsample:
+    method: suggest_float
+    low: 0.6
+    high: 1.0
+    log: false
+  colsample_bytree:
+    method: suggest_float
+    low: 0.6
+    high: 1.0
+    log: false
+  min_child_weight:
+    method: suggest_int
+    low: 1
+    high: 20
+    log: false
+  reg_alpha:
+    method: suggest_float
+    low: 1.0e-3
+    high: 1.0
+    log: true
+  reg_lambda:
+    method: suggest_float
+    low: 1.0e-3
+    high: 5.0
+    log: true
+  gamma:
+    method: suggest_float
+    low: 0.0
+    high: 2.0
+    log: false

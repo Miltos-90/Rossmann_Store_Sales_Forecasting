@@ -2,14 +2,18 @@
 
 import logging
 import os
+from typing import Any
 import optuna
 import numpy as np
 import pandas as pd
+
 import xgboost as xgb
-from typing import Literal
 
 from optuna.study import Study
 from optuna.trial import Trial
+
+from src.engine.target_transformer import TargetTransformer
+from src.settings import CVSettings, XGBSettings
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +67,8 @@ def log_study(study: Study) -> None:
         study: A completed (or partial) Optuna study.
     """
     trials = study.trials
+
+    # Compute summary statistics
     n_total   = len(trials)
     n_complete = sum(t.state == optuna.trial.TrialState.COMPLETE for t in trials)
     n_pruned   = sum(t.state == optuna.trial.TrialState.PRUNED   for t in trials)
@@ -79,21 +85,21 @@ def log_study(study: Study) -> None:
         "pct_pruned": round(p_pruned, 1),
         "n_failed":   n_failed,
     }
-
-    if durations:
-        summary["duration_total_s"] = round(sum(durations), 1)
-        summary["duration_mean_s"]  = round(float(np.mean(durations)), 2)
-        summary["duration_max_s"]   = round(float(max(durations)), 2)
-
-    if complete_values:
-        summary["best_value"]   = round(float(min(complete_values)), 6)
-        summary["worst_value"]  = round(float(max(complete_values)), 6)
-        summary["median_value"] = round(float(np.median(complete_values)), 6)
+    
+    # Compute duration and value statistics
+    summary["duration_total_s"] = round(sum(durations), 1)
+    summary["duration_mean_s"]  = round(float(np.mean(durations)), 2)
+    summary["duration_max_s"]   = round(float(max(durations)), 2)
+  
+    summary["best_value"]   = round(float(min(complete_values)), 6)
+    summary["worst_value"]  = round(float(max(complete_values)), 6)
+    summary["median_value"] = round(float(np.median(complete_values)), 6)
 
     best_trial = study.best_trial
     summary["best_trial_number"] = best_trial.number
-    summary["best_trial_params"] = best_trial.params  # already a dict of JSON-serializable primitives
+    summary["best_trial_params"] = best_trial.params
 
+    # Store the summary as a study-level user attribute
     study.set_user_attr("summary", summary)
     logger.info("Study '%s' summary persisted to Optuna DB.", study.study_name)
 
@@ -116,17 +122,17 @@ def log_trial_cv_results(
         history: DataFrame containing CV results for each boosting round,
             with columns like 'test-{metric}-mean' and 'test-{metric}-std'.
     """
-    test_mean_col = f"test-{metric}-mean"
-    test_std_col  = f"test-{metric}-std"
-    final_loss      = history[test_mean_col].values[-1]
-    final_loss_std  = history[test_std_col].values[-1] if test_std_col in history.columns else float("nan")
-    best_loss       = history[test_mean_col].min()
-    best_n_rounds = int(history[test_mean_col].idxmin()) + 1  # 1-based
+    test_mean_col  = f"test-{metric}-mean"
+    test_std_col   = f"test-{metric}-std"
+    final_loss     = history[test_mean_col].values[-1]
+    final_loss_std = history[test_std_col].values[-1] if test_std_col in history.columns else float("nan")
+    best_loss      = history[test_mean_col].min()
+    best_n_rounds  = int(history[test_mean_col].idxmin()) + 1  # 1-based
 
-    trial.set_user_attr("best_n_rounds",      best_n_rounds)
-    trial.set_user_attr("final_loss_mean",    float(final_loss))
-    trial.set_user_attr("final_loss_std",     float(final_loss_std))
-    trial.set_user_attr("best_loss_mean",     float(best_loss))
+    trial.set_user_attr("best_n_rounds",   best_n_rounds)
+    trial.set_user_attr("final_loss_mean", float(final_loss))
+    trial.set_user_attr("final_loss_std",  float(final_loss_std))
+    trial.set_user_attr("best_loss_mean",  float(best_loss))
 
     logger.debug(
         f"Trial {trial.number} | CV finished — "
@@ -134,37 +140,6 @@ def log_trial_cv_results(
         f"final {metric}: {final_loss:.4f} ± {final_loss_std:.4f}, "
         f"best {metric}: {best_loss:.4f} at round {best_n_rounds}"
     )
-
-
-def overwrite_closed_sales(
-        sales: pd.Series,
-        mode: Literal['interpolate', 'zero'],
-        index_name: str = "Date"
-        ) -> pd.Series:
-    """ 
-    Re-interpolate sales for days when the store was closed (Sundays) with non-zero sales on adjacent days.
-
-    Args
-        sales: Series indexed by ['Date', 'Store'].
-        mode: Method to handle closed days. 'interpolate' fills closed days with interpolated values based on adjacent days' sales, while 'zero' fills closed days with zeros.
-        index_name: Name of the index level representing the date.
-    
-    Returns
-        Series with same structure as input, but with 'Sales' re-interpolated for closed days.
-    """
-    is_closed = sales.index.get_level_values(index_name).day_name() == 'Sunday'
-    sales.loc[is_closed] = np.nan
-
-    if mode == 'interpolate':
-        sales = (sales
-                 .unstack('Store')
-                 .interpolate(method='time')
-                 .stack('Store'))
-
-    elif mode == 'zero':
-        sales.loc[is_closed] = 0
-
-    return sales
 
 
 def _wide_to_long_predictions(s: pd.DataFrame) -> pd.Series:
@@ -218,21 +193,102 @@ def retrieve_sales(s: pd.Series, index: pd.Index) -> pd.Series:
     return s_out
 
 
-def predict(booster: xgb.Booster, X_test: pd.DataFrame) -> pd.Series:
+def compute_cv_sizes(
+    total_days: int,
+    forecast_horizon: int,
+    cv_config: CVSettings,
+) -> dict:
+    """
+    Compute sliding-window sizes for nested time-series CV.
+
+    Formulas (gap = forecast_horizon = H, test sizes fixed to H):
+        outer_train_size = N - H * (K_out + 1)
+        inner_train_size = N - H * (K_out + K_in + 2)
+        outer_test_size  = H
+        inner_test_size  = H
+
+    Validity: N > h * (K_out + K_in + 2)
+
+    Args: 
+        total_days: Total number of days in the dataset for one store (N).
+        forecast_horizon: Forecast horizon in days (H).
+        cv_config: Cross-validation settings containing the number of outer and inner splits.
+    """
+
+    # Rename variables for clarity in formulas
+    n     = total_days
+    h     = forecast_horizon
+    k_out = cv_config.n_outer_splits
+    k_in  = cv_config.n_inner_splits
+
+    outer_train_size = n - h * (k_out + 1)
+    inner_train_size = n - h * (k_out + k_in + 2)
+
+    min_days = h * (k_out + k_in + 2) + 1
+    if inner_train_size <= 0:
+        raise ValueError(
+            f"Dataset too small: {n} days available, "
+            f"at least {min_days} required for a 1-day inner training window."
+        )
+
+    config = {
+        "outer_train": outer_train_size,
+        "inner_train": inner_train_size,
+        "outer_test":  h,
+        "inner_test":  h,
+    }
+
+    return config
+
+
+def predict(X: pd.DataFrame, booster: xgb.Booster, transformer: TargetTransformer):
     """ 
-    Generate predictions for the given test data using the provided XGBoost booster.
+    Predict sales using a trained XGBoost booster and inverse transform the predictions.
 
     Args:
-        booster: Trained XGBoost booster.
-        X_test: Test features.
+        X (pd.DataFrame): Feature matrix for prediction.
+        booster (xgb.Booster): Trained XGBoost booster.
+        transformer (TargetTransformer): Transformer to inverse transform the predictions.
 
     Returns:
-        Series with predictions.
+        pd.Series: Predicted sales values.
     """
-    test_dmatrix  = xgb.DMatrix(X_test, enable_categorical=True)
-    log_preds_raw = booster.predict(test_dmatrix)
-    log_preds = pd.DataFrame(data=log_preds_raw, index=X_test.index)
-    preds_long = _wide_to_long_predictions(log_preds)
-    preds = overwrite_closed_sales(preds_long, mode='zero', index_name="Forecast Date")
+
+    test_dmatrix = xgb.DMatrix(X, enable_categorical=True)
+    preds_raw = booster.predict(test_dmatrix)
+    preds = pd.Series(data=preds_raw, index=X.index, name='Sales')
+    preds = transformer.inverse_transform(preds)
+
     return preds
 
+
+def refit(
+    X: pd.DataFrame,
+    y: pd.Series,
+    best_trial: optuna.trial.FrozenTrial,
+    config: XGBSettings,
+) -> xgb.Booster:
+    """ 
+    Refit XGBoost model on the entire outer fold training set using the best hyperparameters found in the inner loop.
+
+    A temporal validation split (last val_fraction of the training rows) is used
+    with early stopping so that the optimal boosting rounds re-calibrate to the
+    larger outer-fold dataset rather than being fixed at the inner-CV value.
+
+    Args:
+        X: Training features for the outer fold.
+        y: Training targets for the outer fold.
+        best_trial: Optuna trial object containing the best hyperparameters from the inner loop.
+        config: XGBSettings object containing the XGBoost constants.
+
+    Returns:
+        Trained XGBoost booster fitted on the entire outer fold training set with the best hyperparameters.
+    """
+    num_boost_round = best_trial.user_attrs['best_n_rounds']
+    params  = {**config.model_dump(), **best_trial.params}
+    dmatrix = xgb.DMatrix(X, label=y, enable_categorical=True)
+    booster = xgb.train(params=params,
+                        num_boost_round=num_boost_round,
+                        dtrain=dmatrix)
+
+    return booster

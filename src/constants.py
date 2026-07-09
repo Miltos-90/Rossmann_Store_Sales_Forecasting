@@ -3,7 +3,6 @@ import os
 import numpy as np
 from pandas.tseries.offsets import DateOffset
 
-
 # Paths and file names
 DATA_DIR = '../datasets/rossmann-store-sales'
 STORE_FILE = os.path.join(DATA_DIR, 'store.csv')
@@ -13,42 +12,34 @@ LOG_DIR = "./artifacts"
 LOG_FILE = os.path.join(LOG_DIR, "hypertuning.log")
 STORAGE_URL = f"sqlite:///{os.path.join(LOG_DIR, 'hypertuning.db')}"
 
-# Feature engineering settings
-LAGS = [DateOffset(days=1),   DateOffset(days=2),
-        DateOffset(weeks=1),  DateOffset(weeks=2),  DateOffset(weeks=3),
-        DateOffset(months=1), DateOffset(months=3), DateOffset(months=6),
-        DateOffset(years=1)]
-
-DIFFS = [DateOffset(days=1),
-         DateOffset(months=1), DateOffset(months=3), DateOffset(months=6)]
-
-ROLL_WINDOWS = { 7: [DateOffset(days=1), DateOffset(weeks=1)],
-                30: [DateOffset(months=1), DateOffset(months=3), DateOffset(months=6)]}
-
 # Training settings
-FORECAST_HORIZON        = 42 # of days to predict
+FORECAST_HORIZON = 10 # of days ahead to predict
+ROLL_WINDOWS = ['7D', '14D', '30D', '60D']
+DIFFS = [DateOffset(days=d) for d in np.arange(1, 7).tolist() + [14, 30]]
+LAGS = (
+    [DateOffset(days=d) for d in np.arange(0, 15)] + 
+    [DateOffset(weeks=w) for w in [3, 4]] + 
+    [DateOffset(months=m) for m in np.arange(2, 7)] +
+    [DateOffset(years=1)]
+)
 
 # CV settings
-N_OUTER_SPLITS          = 6 # number of outer CV splits
-OUTER_TRAIN_SIZE        = 650 # of days in the training portion of each outer CV split
-N_INNER_SPLITS          = 4 # number of inner CV splits for hyperparameter tuning
-INNER_TRAIN_SIZE        = 180   # of days in the training portion of each inner CV split
-OUTER_TRAIN_SIZE        = \
-    (N_INNER_SPLITS + 1) * FORECAST_HORIZON + INNER_TRAIN_SIZE  # calculated to ensure that the last inner split ends at least FORECAST_HORIZON days before the 
-                                                                # end of the outer training period, allowing for a full forecast horizon in the inner validation sets.
+N_OUTER_SPLITS   = 5
+N_INNER_SPLITS   = 3
+
 # Hyperparameter tuning settings
 NUM_TRIALS              = 100 # number of Optuna trials for hyperparameter tuning in each outer CV split
 SEED                    = 42 # random seed for reproducibility
 MONITOR_PERIODS         = 100 # number of CV rounds to report in pruning callback
 NUM_STARTUP_TRIALS      = 5 # Pruning is disabled until the given number of trials finish in the same study. After that, pruning is enabled for all subsequent trials.
-NUM_JOBS                = 4 # number of parallel jobs for Optuna.  Set to -1 to use all available cores.
+NUM_JOBS                = -1 # number of parallel jobs for Optuna.  Set to -1 to use all available cores.
 EARLY_STOPPING_ROUNDS   = 10 # Number of rounds with no improvement after which training will be stopped.  Set to None to disable early stopping.
 NUM_BOOST_ROUNDS        = 10000 # Maximum number of boosting rounds to train.  Early stopping may cause training to stop before this number is reached.
 REFIT_VAL_FRACTION      = 0.1 # Fraction of the training data to set aside for early stopping when refitting the final model with the best hyperparameters on the entire outer fold training set.
+
 XGB_CONSTANTS: dict = {
     "tree_method": "hist",
     "device": "cpu",
-    "multi_strategy": "multi_output_tree",
     "objective": "reg:squarederror",
     "eval_metric": "rmse",
     "verbosity": 0,
@@ -56,7 +47,7 @@ XGB_CONSTANTS: dict = {
 
 HYPERPARAMETERS = {
     "max_depth":        ("suggest_int",   3,    10,   {"log": False}),
-    "learning_rate":    ("suggest_float", 0.01, 0.3,  {"log": True}),
+    "learning_rate":    ("suggest_float", 0.001, 0.3, {"log": True}),
     "subsample":        ("suggest_float", 0.6,  1.0,  {"log": False}), 
     "colsample_bytree": ("suggest_float", 0.6,  1.0,  {"log": False}), 
     "min_child_weight": ("suggest_int",   1,    20,   {"log": False}),
