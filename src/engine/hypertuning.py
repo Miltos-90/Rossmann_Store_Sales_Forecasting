@@ -1,26 +1,32 @@
 """ Nested time-series cross-validation with hyperopt using the native XGBoost API. """
 
 import logging
+import os
 import optuna
 import numpy as np
 import pandas as pd
 import xgboost as xgb
 
 from typing import Any
-from sklearn.model_selection import BaseCrossValidator
 from optuna.trial import Trial, TrialState
 from optuna.pruners import MedianPruner
 from optuna.samplers import TPESampler
+from optuna.study import Study
+from optuna.storages.journal import (
+    JournalFileOpenLock, JournalStorage, JournalFileBackend
+)
+from sklearn.model_selection import BaseCrossValidator
 from optuna_integration.xgboost import XGBoostPruningCallback
 
 from src.settings.models import HyperparameterSpec, AppSettings
-
 from .callbacks import BoosterCollector
 from .cv import TimeSeriesCV
-from . import utils
-
+from . import log, checkpoint as ckpt
 
 logger = logging.getLogger(__name__)
+
+_COMPLETE_STATES = [TrialState.PRUNED, TrialState.COMPLETE]  # States considered as completed for trial counting
+
 
 def _suggest_params(trial: Trial, hyperparameters: dict[str, HyperparameterSpec]) -> dict[str, Any]:
     """Suggest hyperparameters for a trial using Optuna's sampling methods.
@@ -46,6 +52,7 @@ def _suggest_params(trial: Trial, hyperparameters: dict[str, HyperparameterSpec]
         params[name] = suggest_fn(name, spec.low, spec.high, log=spec.log)
 
     return params
+
 
 def _objective(
     trial: Trial,
@@ -99,16 +106,15 @@ def _objective(
                      verbose_eval=False,
                      seed=config.hypertuning.seed)
 
-    utils.log_trial_cv_results(trial=trial, metric=metric, history=history)
+    log.trial(trial=trial, metric=metric, history=history)
 
-    utils.save_trial_artifacts(study_name=study_name,
-                               trial=trial,
-                               history=history,
-                               boosters=booster_collector.cvfolds,
-                               log_dir=config.path.log_dir)
+    ckpt.trial(study_name=study_name,
+               trial=trial,
+               history=history,
+               boosters=booster_collector.cvfolds,
+               log_dir=config.path.log_dir)
 
     return history[f"test-{metric}-mean"].min()
-
 
 def optimize(
         study_name: str, 
@@ -130,32 +136,28 @@ def optimize(
         None
     """
 
+    pruner  = MedianPruner(n_startup_trials=config.hypertuning.num_startup_trials)
+    sampler = TPESampler(seed=config.hypertuning.seed)    
+    storage = ckpt.storage(log_dir=config.path.log_dir, study_name=study_name)    
+    study   = optuna.create_study(study_name=study_name,
+                                  storage=storage,
+                                  load_if_exists=True,
+                                  direction="minimize",
+                                  pruner=pruner,
+                                  sampler=sampler)
+
+    # Determine the number of remaining trials to run based on completed trials
+    finished_trials = study.get_trials(deepcopy=False, states=_COMPLETE_STATES)
+    remaining_trials = config.hypertuning.num_trials - len(finished_trials)
+    
     inner_cv = TimeSeriesCV(n_splits=config.cross_validation.n_inner_splits,
                             train_size=cv_settings["inner_train"],
                             test_size=cv_settings["inner_test"],
                             gap=config.horizon.days)
 
-    pruner = MedianPruner(n_startup_trials=config.hypertuning.num_startup_trials)
-
-    sampler = TPESampler(seed=config.hypertuning.seed)
-
     obj_fcn = lambda trial: _objective(trial, X_train, y_train, inner_cv,
                                        study_name=study_name,
                                        config=config)
-
-    study = optuna.create_study(study_name=study_name,
-                                storage=config.path.storage_url,
-                                load_if_exists=True,
-                                direction="minimize",
-                                pruner=pruner,
-                                sampler=sampler)
-
-    finished_trials = study.get_trials(deepcopy=False,
-                                       states=[TrialState.PRUNED, TrialState.COMPLETE])
-
-    remaining_trials = config.hypertuning.num_trials - len(finished_trials)
-
+    
     study.optimize(obj_fcn, n_trials=remaining_trials, n_jobs=config.hypertuning.num_jobs)
-    utils.log_study(study)
-
-    return
+    log.study(study)

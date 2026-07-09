@@ -1,10 +1,10 @@
 path:
-  data_dir: ../datasets/rossmann-store-sales
+  data_dir: C:/Users/m_kal/Downloads/datasets/rossmann-store-sales
   log_dir: ./artifacts
   stores: store.csv
   train: train.csv
   logs: hypertuning.log
-  storage_url: sqlite:///./artifacts/hypertuning.db
+  predictions: predictions.csv
 
 horizon: 10  # Forecast horizon in days
 

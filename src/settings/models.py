@@ -39,49 +39,36 @@ class PathSettings(BaseModel):
     stores:   Path
     train:    Path
     logs:     Path
-    storage_url: str
+    predictions: Path
 
     @model_validator(mode="after")
     def _compute_derived_paths(self) -> PathSettings:
         """ 
-        Compute the full paths for stores, train, and logs based on the data_dir and log_dir. 
+        Compute the full paths for stores, train, logs, and predictions based on the data_dir and log_dir. 
         
         Returns:
             PathSettings: The instance with updated paths.
         """
-        self.stores = os.path.join(self.data_dir, self.stores)
-        self.train  = os.path.join(self.data_dir, self.train)
-        self.logs   = os.path.join(self.log_dir, self.logs)
-        
+        self.stores      = os.path.join(self.data_dir, self.stores)
+        self.train       = os.path.join(self.data_dir, self.train)
+        self.logs        = os.path.join(self.log_dir, self.logs)
+        self.predictions = os.path.join(self.log_dir, self.predictions)
+
         return self
-    
-    @field_validator("storage_url")
-    @classmethod
-    def _validate_storage_url(cls, v: str) -> str:
-        """ 
-        Add "sqlite:///" prefix to the storage_url if it doesn't already have it, 
-        and convert relative paths to absolute paths.
-        """
-        if not v.startswith("sqlite:///"):
-            v = "sqlite:///" + v
-        # Convert relative path to absolute path
-        if v.startswith("sqlite:///"):
-            path = v[len("sqlite:///"):]
-            abs_path = os.path.abspath(path)
-            v = "sqlite:///" + abs_path
-        return v
-    
+
+
     # Convert all relative paths to absolute paths
     @model_validator(mode="after")  
     def _convert_paths_to_absolute(self) -> PathSettings:
         """ 
         Convert all relative paths to absolute paths.
         """
-        self.data_dir = os.path.abspath(self.data_dir)
-        self.log_dir  = os.path.abspath(self.log_dir)
-        self.stores   = os.path.abspath(self.stores)
-        self.train    = os.path.abspath(self.train)
-        self.logs     = os.path.abspath(self.logs)
+        self.data_dir    = os.path.abspath(self.data_dir)
+        self.log_dir     = os.path.abspath(self.log_dir)
+        self.stores      = os.path.abspath(self.stores)
+        self.train       = os.path.abspath(self.train)
+        self.logs        = os.path.abspath(self.logs)
+        self.predictions = os.path.abspath(self.predictions)
         return self
 
 
@@ -136,7 +123,6 @@ class XGBSettings(BaseModel):
         if v not in (0, 1, 2, 3):
             raise ValueError("verbosity must be 0, 1, 2, or 3")
         return v
-
 
 
 class HyperparameterSpec(BaseModel):

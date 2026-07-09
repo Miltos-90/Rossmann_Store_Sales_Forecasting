@@ -15,14 +15,14 @@ def plot_actual_vs_predicted(results, n_days_to_plot, n_days_offset):
 
     for i, store in enumerate(plot_stores):
 
-        actual_store_sales    = actuals_recent.loc[(store, slice(None))].copy()
-        predicted_store_sales = preds_recent.loc[(store, slice(None))].copy()
+        act_store_sales  = actuals_recent.loc[(store, slice(None))].copy()
+        pred_store_sales = preds_recent.loc[(store, slice(None))].copy()
 
-        actual_store_sales.fillna(method='ffill', inplace=True)     # Forward fill to maintain continuity in the plot
-        predicted_store_sales.fillna(method='ffill', inplace=True)  # Forward fill to maintain continuity in the plot
+        act_store_sales.ffill(inplace=True)
+        pred_store_sales.ffill(inplace=True)
 
-        actual_store_sales.plot(label="Actual", ax=ax[i])
-        predicted_store_sales.plot(label="Predicted", ax=ax[i], linestyle='--')
+        act_store_sales.plot(label="Actual", ax=ax[i])
+        pred_store_sales.plot(label="Predicted", ax=ax[i], linestyle='--')
 
         ax[i].set_ylabel("Store {}".format(store))
         ax[i].set_xlabel("Date")

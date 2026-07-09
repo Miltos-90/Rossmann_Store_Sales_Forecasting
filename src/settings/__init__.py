@@ -1,3 +1,3 @@
 from .models import (
-    AppSettings, FeatureEngineeringSettings, CVSettings, XGBSettings
+    AppSettings, FeatureEngineeringSettings, CVSettings, XGBSettings, PathSettings
 )

@@ -63,6 +63,9 @@ def compute(df: pd.DataFrame,
     promo       = from_store.days_in_promotion(df['Promo'], offset=horizon)
     promo2      = from_store.days_in_promotion(df['Promo2'], offset=horizon)
 
+    store_type = df['StoreType']
+    assortment = df['Assortment']
+
     features = [
         # Past features
         lag_features,
@@ -74,10 +77,13 @@ def compute(df: pd.DataFrame,
         hnames_ext,
         competition,
         promo,
-        promo2
+        promo2,
+        store_type,
+        assortment
     ]
 
     features_df = pd.concat(features, axis=1)
+
     features_df["subdivision"] = subdiv # Now, add the subdivision for all rows.
     
     return features_df
