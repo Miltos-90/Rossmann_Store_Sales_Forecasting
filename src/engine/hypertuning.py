@@ -147,7 +147,7 @@ def optimize(
                                   sampler=sampler)
 
     # Determine the number of remaining trials to run based on completed trials
-    finished_trials = study.get_trials(deepcopy=False, states=_COMPLETE_STATES)
+    finished_trials  = study.get_trials(deepcopy=False, states=_COMPLETE_STATES)
     remaining_trials = config.hypertuning.num_trials - len(finished_trials)
     
     inner_cv = TimeSeriesCV(n_splits=config.cross_validation.n_inner_splits,

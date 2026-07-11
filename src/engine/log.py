@@ -94,6 +94,12 @@ def study(study: Study) -> None:
 
     # Store the summary as a study-level user attribute
     study.set_user_attr("summary", summary)
-    logger.info(f"Study '{study.study_name}' summary persisted to optuna storage.")
+
+    # Log the summary for visibility
+    logger.info(f"Study '{study.study_name}' finished")
+    logger.info(f"Best trial {best_trial.number} with value {best_trial.value:.6f} and params {best_trial.params}")
+    logger.info(f"Total trials: {n_total}, Complete: {n_complete}, Pruned: {n_pruned} ({p_pruned:.1f}%), Failed: {n_failed}")
+    logger.info(f"Objective value: best={summary['best_value']}, worst={summary['worst_value']}, median={summary['median_value']}")
+    logger.info(f"Duration (s): total={summary['duration_total_s']}, mean={summary['duration_mean_s']}, max={summary['duration_max_s']}")
 
     return

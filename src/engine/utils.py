@@ -103,7 +103,7 @@ def refit(
     Returns:
         Trained XGBoost booster fitted on the entire outer fold training set with the best hyperparameters.
     """
-    logger.info(f"Refitting model with hyperparameters: {best_trial.params}")
+    logger.debug(f"Refitting with hyperparameters: {best_trial.params}")
     num_boost_round = best_trial.user_attrs['best_n_rounds']
     params  = {**config.model_dump(), **best_trial.params}
     dmatrix = xgb.DMatrix(X, label=y, enable_categorical=True)
