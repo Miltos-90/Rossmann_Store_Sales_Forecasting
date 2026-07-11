@@ -67,23 +67,22 @@ def main(args):
 
     # Store results table.
     actuals = df.set_index(['Store', 'Date'])['Sales']
-    results = pd.merge(left=actuals, right=predictions,
-                       left_index=True, right_index=True,
+    results = pd.merge(left=actuals, left_index=True, 
+                       right=predictions, right_index=True,
                        suffixes=('_actual', '_predicted')
                        ).sort_index()
 
     results.to_csv(config.path.predictions, index=True)
-    logger.info("Out-of-fold predictions saved to {}".format(config.path.predictions))
+    logger.info(f"Out-of-fold predictions saved to {config.path.predictions}")
 
     # Compute errors
-    act = results["Sales_actual"].values
+    act  = results["Sales_actual"].values
     pred = results["Sales_predicted"].values
     err_mae  = mean_absolute_error(act, pred)
     err_rmse = root_mean_squared_error(act, pred)
     logger.info(f"Out-of-fold MAE: {err_mae:.2f}")
     logger.info(f"Out-of-fold RMSE: {err_rmse:.2f}")
 
-    return
 
 if __name__ == "__main__":
 
