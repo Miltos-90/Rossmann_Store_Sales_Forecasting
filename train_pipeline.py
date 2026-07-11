@@ -27,6 +27,11 @@ def main(args):
 
     # Read and preprocess the data
     sales, stores = src.load_data(config.path)
+    ################################################## TODO: Remove this hardcoding
+    stores_to_use = [1, 2, 3]
+    stores = stores[stores['Store'].isin(stores_to_use)]
+    ##################################################
+    
     df = src.preprocess_data(sales, stores)
     X, y, trf = src.generate_dataset(df, config)
 

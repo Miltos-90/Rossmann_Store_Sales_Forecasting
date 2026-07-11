@@ -1,0 +1,142 @@
+locals {
+  resource_group_location = "eastus"
+
+  storage_account = {
+    tier             = "Standard"
+    replication_type = "LRS" # Cheapest option
+  }
+
+  virtual_machine = {
+    instance_type   = "Standard_e17_v5" # 16 vCPUs, 128 GiB RAM, No storage
+    priority        = "Spot"
+    eviction_policy = "Delete" # Deletes the OS disk upon eviction to stop billing entirely
+    max_bid_price   = -1       # Default to capacity-only eviction
+    admin_username  = "azureuser"
+    ssh_public_key  = "C:\\Users\\m_kal\\.ssh\\id_rsa.pub"
+    # Run command `ssh-keygen -t rsa -b 4096` to generate a new SSH key pair if you don't have one already. 
+    # Press Enter to accept the default file location. Press Enter again to skip setting a passphrase. 
+    # Write down the location of the private key (usually C:\Users\<username>\.ssh\id_rsa) and keep it safe.
+  }
+}
+
+
+terraform {
+  required_version = ">= 1.0.0"
+
+  required_providers {
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = "~> 4.0"
+    }
+  }
+}
+
+provider "azurerm" {
+  features {
+    resource_group {
+      prevent_deletion_if_contains_resources = false
+    }
+  }
+}
+
+resource "azurerm_resource_group" "ml_rg" {
+  name     = "rg-ml-spot-minimal"
+  location = local.resource_group_location
+}
+
+
+# Storage
+resource "azurerm_storage_account" "ml_storage" {
+  name                     = "stmlspotminimal123"
+  resource_group_name      = azurerm_resource_group.ml_rg.name
+  location                 = local.resource_group_location
+  account_tier             = local.storage_account.tier
+  account_replication_type = local.storage_account.replication_type
+}
+
+resource "azurerm_storage_container" "artifacts" {
+  name               = "artifacts"
+  storage_account_id = azurerm_storage_account.ml_storage.id
+}
+
+
+# RBAC
+resource "azurerm_user_assigned_identity" "vm_identity" {
+  name                = "id-spot-vm-executor"
+  resource_group_name = azurerm_resource_group.ml_rg.name
+  location            = local.resource_group_location
+}
+
+resource "azurerm_role_assignment" "storage_contrib" {
+  scope                = azurerm_storage_account.ml_storage.id
+  role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = azurerm_user_assigned_identity.vm_identity.principal_id
+}
+
+
+# Networking
+resource "azurerm_virtual_network" "ml_vnet" {
+  name                = "vnet-ml-minimal"
+  address_space       = ["10.0.0.0/16"]
+  location            = local.resource_group_location
+  resource_group_name = azurerm_resource_group.ml_rg.name
+}
+
+resource "azurerm_subnet" "ml_subnet" {
+  name                 = "snet-minimal"
+  resource_group_name  = azurerm_resource_group.ml_rg.name
+  virtual_network_name = azurerm_virtual_network.ml_vnet.name
+  address_prefixes     = ["10.0.1.0/24"]
+}
+
+resource "azurerm_network_interface" "ml_nic" {
+  name                = "nic-ml-vm"
+  location            = local.resource_group_location
+  resource_group_name = azurerm_resource_group.ml_rg.name
+
+  ip_configuration {
+    name                          = "internal"
+    subnet_id                     = azurerm_subnet.ml_subnet.id
+    private_ip_address_allocation = "Dynamic"
+  }
+}
+
+# Virtual Machine
+resource "azurerm_linux_virtual_machine" "spot_vm" {
+  name                = "vm-ml-spot-worker"
+  resource_group_name = azurerm_resource_group.ml_rg.name
+  location            = local.resource_group_location
+  size                = local.virtual_machine.instance_type
+  admin_username      = local.virtual_machine.admin_username
+
+  priority        = local.virtual_machine.priority
+  eviction_policy = local.virtual_machine.eviction_policy # Deletes the OS disk upon eviction to stop billing entirely
+  max_bid_price   = local.virtual_machine.max_bid_price   # Default to capacity-only eviction
+
+  admin_ssh_key {
+    username   = local.virtual_machine.admin_username
+    public_key = file(local.virtual_machine.ssh_public_key)
+  }
+
+  network_interface_ids = [
+    azurerm_network_interface.ml_nic.id,
+  ]
+
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Standard_LRS"
+  }
+
+  source_image_reference {
+    publisher = "Canonical"
+    offer     = "0001-com-ubuntu-server-jammy"
+    sku       = "22_04-lts"
+    version   = "latest"
+  }
+
+  # Attach the Managed Identity to this specific VM
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.vm_identity.id]
+  }
+}
