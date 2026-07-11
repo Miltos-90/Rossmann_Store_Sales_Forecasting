@@ -1,7 +1,6 @@
 """ Nested time-series cross-validation with hyperopt using the native XGBoost API. """
 
 import logging
-import os
 import optuna
 import numpy as np
 import pandas as pd
@@ -11,10 +10,7 @@ from typing import Any
 from optuna.trial import Trial, TrialState
 from optuna.pruners import MedianPruner
 from optuna.samplers import TPESampler
-from optuna.study import Study
-from optuna.storages.journal import (
-    JournalFileOpenLock, JournalStorage, JournalFileBackend
-)
+
 from sklearn.model_selection import BaseCrossValidator
 from optuna_integration.xgboost import XGBoostPruningCallback
 

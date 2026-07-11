@@ -3,7 +3,6 @@
 import xgboost as xgb
 from typing import Optional
 
-
 class BoosterCollector(xgb.callback.TrainingCallback):
     """Callback that captures the fold boosters from xgb.cv() after training ends."""
 
