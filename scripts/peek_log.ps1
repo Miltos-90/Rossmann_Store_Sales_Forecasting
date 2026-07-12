@@ -1,3 +1,7 @@
+####################
+# Check the last 50 lines of the training log on the specified VM
+####################
+
 az vm run-command invoke `
   --resource-group rg-ml-spot-minimal `
   --name vm-worker `

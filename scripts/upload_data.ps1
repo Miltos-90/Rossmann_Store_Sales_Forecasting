@@ -1,14 +1,17 @@
-# This script uploads your local training data to Azure Blob Storage using AzCopy.
+####################
+# Upload local training data to Azure Blob Storage.
+# This script uses AzCopy, which is a command-line utility designed for fast and reliable data transfer to and from Azure Storage.
 # To get AzCopy run this command: 
 # winget install -e --id Microsoft.Azure.AZCopy.10
+####################
 
-# 1. Define your local paths and Azure constants
+# 1. Define local paths and Azure constants
 $localDataPath    = "C:\path\to\your\local\training_data_folder"  # <-- Update this path
 $storageAccount   = "stmlspotminimal123"
 $containerName    = "artifacts"
 $destinationFolder = "data" # Creates a 'data/' directory inside the container
 
-# 2. Ensure you are logged into Azure CLI locally
+# 2. Ensure we are logged into Azure CLI locally
 Write-Host "Checking Azure authentication..."
 az account show > $null
 if ($LASTEXITCODE -ne 0) {
@@ -18,7 +21,7 @@ if ($LASTEXITCODE -ne 0) {
 
 # 3. Create the container if it doesn't exist
 Write-Host "Verifying blob container '$containerName' exists..."
-# Using the --auth-mode login ensures it uses your current 'az login' credentials
+# Using the --auth-mode login ensures it uses the current 'az login' credentials
 az storage container create `
   --name $containerName `
   --account-name $storageAccount `
