@@ -1,4 +1,7 @@
 #!/bin/bash
+set -e # Exit immediately if any command exits with a non-zero status
+set -x # Print every command to stdout before executing it
+
 # 1. Install BlobFUSE2
 wget https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb
 dpkg -i packages-microsoft-prod.deb
