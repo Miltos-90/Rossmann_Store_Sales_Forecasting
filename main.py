@@ -1,6 +1,8 @@
 """ Training pipeline. """
+import argparse
 import os
 import logging
+import sys
 import optuna
 import pandas as pd
 
@@ -11,18 +13,34 @@ from sklearn.metrics import (
 import src
 
 
+def parse_args():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description="Run the training pipeline.")
+    parser.add_argument("--config", 
+                        type=str, 
+                        default="./config.yaml", 
+                        help="Path to the configuration YAML file.")
+
+    return parser.parse_args()
+
+
 def main(args):
 
     """ Main function to run the training pipeline. """
 
+    # Load configuration and create artifact directory
     config = src.AppSettings.from_yaml(args.config)
+    os.makedirs(config.path.artifact_dir, exist_ok=True)
 
     # Set up logging
-    os.makedirs(config.path.log_dir, exist_ok=True)
     optuna.logging.set_verbosity(optuna.logging.WARNING)
-    logging.basicConfig(level=logging.INFO,
-                        filename=config.path.logs,
-                        format="%(levelname)s  %(message)s")
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler(sys.stdout)
+        ]
+    )
     logger = logging.getLogger(__name__)
 
     # Read and preprocess the data
@@ -31,7 +49,7 @@ def main(args):
     stores_to_use = [1, 2, 3]
     stores = stores[stores['Store'].isin(stores_to_use)]
     ##################################################
-    
+
     df = src.preprocess_data(sales, stores)
     X, y, trf = src.generate_dataset(df, config)
 
@@ -82,5 +100,5 @@ def main(args):
 
 if __name__ == "__main__":
 
-    args = src.parse_args()
+    args = parse_args()
     main(args)

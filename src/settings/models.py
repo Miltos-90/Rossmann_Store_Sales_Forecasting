@@ -34,25 +34,25 @@ HorizonOffset = Annotated[
 
 # ---------- Models ----------
 class PathSettings(BaseModel):
-    data_dir: Path
-    log_dir:  Path
-    stores:   Path
-    train:    Path
-    logs:     Path
-    predictions: Path
+    data_dir:     Path
+    artifact_dir: Path
+    stores:       Path
+    train:        Path
+    logs:         Path
+    predictions:  Path
 
     @model_validator(mode="after")
     def _compute_derived_paths(self) -> PathSettings:
         """ 
-        Compute the full paths for stores, train, logs, and predictions based on the data_dir and log_dir. 
+        Compute the full paths for stores, train, logs, and predictions based on the data_dir and artifact_dir. 
         
         Returns:
             PathSettings: The instance with updated paths.
         """
         self.stores      = os.path.join(self.data_dir, self.stores)
         self.train       = os.path.join(self.data_dir, self.train)
-        self.logs        = os.path.join(self.log_dir, self.logs)
-        self.predictions = os.path.join(self.log_dir, self.predictions)
+        self.logs        = os.path.join(self.artifact_dir, self.logs)
+        self.predictions = os.path.join(self.artifact_dir, self.predictions)
 
         return self
 
@@ -63,12 +63,12 @@ class PathSettings(BaseModel):
         """ 
         Convert all relative paths to absolute paths.
         """
-        self.data_dir    = os.path.abspath(self.data_dir)
-        self.log_dir     = os.path.abspath(self.log_dir)
-        self.stores      = os.path.abspath(self.stores)
-        self.train       = os.path.abspath(self.train)
-        self.logs        = os.path.abspath(self.logs)
-        self.predictions = os.path.abspath(self.predictions)
+        self.data_dir     = os.path.abspath(self.data_dir)
+        self.artifact_dir = os.path.abspath(self.artifact_dir)
+        self.stores       = os.path.abspath(self.stores)
+        self.train        = os.path.abspath(self.train)
+        self.logs         = os.path.abspath(self.logs)
+        self.predictions  = os.path.abspath(self.predictions)
         return self
 
 

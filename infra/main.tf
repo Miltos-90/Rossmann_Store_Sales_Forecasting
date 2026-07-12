@@ -64,11 +64,6 @@ resource "azurerm_storage_account" "ml_storage" {
   account_replication_type = local.storage_account.replication_type
 }
 
-resource "azurerm_storage_container" "artifacts" {
-  name               = "artifacts"
-  storage_account_id = azurerm_storage_account.ml_storage.id
-}
-
 
 # RBAC
 resource "azurerm_user_assigned_identity" "vm_identity" {
@@ -110,6 +105,7 @@ resource "azurerm_network_interface" "ml_nic" {
     private_ip_address_allocation = "Dynamic"
   }
 }
+
 
 # Virtual Machine
 resource "azurerm_linux_virtual_machine" "spot_vm" {

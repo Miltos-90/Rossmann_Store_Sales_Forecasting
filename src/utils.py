@@ -2,7 +2,6 @@
 """ Utility functions for the training pipeline. """
 
 import os
-import argparse
 import logging
 
 import pandas as pd
@@ -16,18 +15,7 @@ from src.engine import TargetTransformer
 from src.features import compute as compute_features
 from src.engine import study_storage, refit as _refit
 
-
 logger = logging.getLogger(__name__)
-
-def parse_args():
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description="Run the training pipeline.")
-    parser.add_argument("--config", 
-                        type=str, 
-                        default="./config.yaml", 
-                        help="Path to the configuration YAML file.")
-
-    return parser.parse_args()
 
 
 def load_data(path_config: PathSettings) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -102,7 +90,7 @@ def refit(X_train: pd.DataFrame, y_train: pd.Series, study_name: str, config: Ap
 
     # If the model for this outer fold already exists, load it; otherwise, refit the best model and save it.
     booster_name = f"{study_name}_best_model.ubj"
-    booster_path = os.path.join(config.path.log_dir, booster_name)  # Path to save the best model for this outer fold.
+    booster_path = os.path.join(config.path.artifact_dir, booster_name)  # Path to save the best model for this outer fold.
 
     if os.path.exists(booster_path):
         # Load the existing model
@@ -114,7 +102,7 @@ def refit(X_train: pd.DataFrame, y_train: pd.Series, study_name: str, config: Ap
         # Refit the best model using the best hyperparameters from the study
         logger.info(f"Refitting best model for '{study_name}'.")
 
-        storage = study_storage(log_dir=config.path.log_dir, study_name=study_name)
+        storage = study_storage(log_dir=config.path.artifact_dir, study_name=study_name)
         study   = optuna.load_study(study_name=study_name, storage=storage)
         booster = _refit(X_train, y_train, study.best_trial, config.model_constants)
         booster.save_model(booster_path)

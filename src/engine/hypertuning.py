@@ -108,7 +108,7 @@ def _objective(
                trial=trial,
                history=history,
                boosters=booster_collector.cvfolds,
-               log_dir=config.path.log_dir)
+               log_dir=config.path.artifact_dir)
 
     return history[f"test-{metric}-mean"].min()
 
@@ -134,7 +134,7 @@ def optimize(
 
     pruner  = MedianPruner(n_startup_trials=config.hypertuning.num_startup_trials)
     sampler = TPESampler(seed=config.hypertuning.seed)    
-    storage = ckpt.storage(log_dir=config.path.log_dir, study_name=study_name)    
+    storage = ckpt.storage(log_dir=config.path.artifact_dir, study_name=study_name)    
     study   = optuna.create_study(study_name=study_name,
                                   storage=storage,
                                   load_if_exists=True,
