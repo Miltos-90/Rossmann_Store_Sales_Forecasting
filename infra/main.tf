@@ -1,37 +1,20 @@
-######### CONSTANTS #########
-
+######### CONSTANTS & PROVIDERS #########
 locals {
   resource_group_location = "eastus"
-  storage_account = {
-    tier             = "Standard"
-    replication_type = "LRS" # Cheapest option
-  }
+  
+  use_low_priority = true  # Low priority = Spot VMs, Dedicated = Standard VMs
 
-  use_spot_vm = true # true: Spot VM, false: Regular VM
-
-  virtual_machine = local.use_spot_vm ? {
-    # Spot VM configuration (pricing: https://azure.microsoft.com/en-us/pricing/spot-advisor/#pricing)
-    instance_type   = "Standard_E16as_v7" # E16as v7: 16 vCPUs, 128 GiB RAM, No storage
-    priority        = "Spot"
-    eviction_policy = "Delete"
-    max_bid_price   = -1
+  virtual_machine = local.use_low_priority ? {
+    instance_type = "Standard_E16as_v7" # # E16as v7: 16 vCPUs, 128 GiB RAM, No storage
+    vm_priority   = "LowPriority"
   } : {
-    # Regular VM configuration (pricing: https://azure.microsoft.com/en-us/pricing/details/virtual-machines/linux/#pricing)
-    instance_type   = "Standard_B2ls_v2" # B2ls v2: 2 vCPUs, 4 GiB RAM, No storage
-    priority        = "Regular"
+    instance_type = "Standard_B2ls_v2"  # B2ls v2: 2 vCPUs, 4 GiB RAM, No storage
+    vm_priority   = "Dedicated"         
   }
-
-  # VM constants
-  vm_ssh_key_path = "C:\\Users\\m_kal\\.ssh\\id_rsa.pub"
-    # Run command `ssh-keygen -t rsa -b 4096` to generate a new SSH key pair if you don't have one already. 
-    # Press Enter to accept the default file location. Press Enter again to skip setting a passphrase. 
-    # Write down the location of the private key (usually C:\Users\<username>\.ssh\id_rsa) and keep it safe.
 }
 
-######### CONFIGURATION #########
 terraform {
   required_version = ">= 1.0.0"
-
   required_providers {
     azurerm = {
       source  = "hashicorp/azurerm"
@@ -41,107 +24,97 @@ terraform {
 }
 
 provider "azurerm" {
-  features {
-    resource_group {
-      prevent_deletion_if_contains_resources = false
-    }
-  }
+  features {}
 }
 
-# Resource Group
+# 1. Resource Group
 resource "azurerm_resource_group" "ml_rg" {
-  name     = "rg-ml-spot-minimal"
+  name     = "rg-ml-workspace"
   location = local.resource_group_location
 }
 
+######### FOUNDATIONAL DEPENDENCIES #########
 
-# Storage
+# 2. Storage Account (Used for Datastores, scripts, and logs)
 resource "azurerm_storage_account" "ml_storage" {
-  name                     = "stmlspotminimal123"
+  name                     = "stmlws123"
   resource_group_name      = azurerm_resource_group.ml_rg.name
   location                 = local.resource_group_location
-  account_tier             = local.storage_account.tier
-  account_replication_type = local.storage_account.replication_type
+  account_tier             = "Standard"
+  account_replication_type = "LRS"  # Locally Redundant Storage - the cheapest option for non-critical data
 }
 
+# 3. Key Vault (Used to securely store storage account keys and secrets)
+data "azurerm_client_config" "current" {}
 
-# RBAC
-resource "azurerm_user_assigned_identity" "vm_identity" {
-  name                = "id-vm-executor"
-  resource_group_name = azurerm_resource_group.ml_rg.name
-  location            = local.resource_group_location
+resource "azurerm_key_vault" "ml_kv" {
+  name                        = "kv-ml-workspace-123"
+  location                    = local.resource_group_location
+  resource_group_name         = azurerm_resource_group.ml_rg.name
+  tenant_id                   = data.azurerm_client_config.current.tenant_id
+  sku_name                    = "standard"
+  purge_protection_enabled    = false
 }
 
-resource "azurerm_role_assignment" "storage_contrib" {
-  scope                = azurerm_storage_account.ml_storage.id
-  role_definition_name = "Storage Blob Data Contributor"
-  principal_id         = azurerm_user_assigned_identity.vm_identity.principal_id
-}
-
-
-# Networking
-resource "azurerm_virtual_network" "ml_vnet" {
-  name                = "vnet-ml"
-  address_space       = ["10.0.0.0/16"]
+# 4. Application Insights & Log Analytics (Used for training log telemetry)
+resource "azurerm_log_analytics_workspace" "ml_law" {
+  name                = "law-ml-telemetry"
   location            = local.resource_group_location
   resource_group_name = azurerm_resource_group.ml_rg.name
+  sku                 = "PerGB2018"  # PerGB2018: Pay-as-you-go pricing model
 }
 
-resource "azurerm_subnet" "ml_subnet" {
-  name                 = "snet-vm"
-  resource_group_name  = azurerm_resource_group.ml_rg.name
-  virtual_network_name = azurerm_virtual_network.ml_vnet.name
-  address_prefixes     = ["10.0.1.0/24"]
-}
-
-resource "azurerm_network_interface" "ml_nic" {
-  name                = "nic-vm"
+resource "azurerm_application_insights" "ml_appinsights" {
+  name                = "appi-ml-telemetry"
   location            = local.resource_group_location
   resource_group_name = azurerm_resource_group.ml_rg.name
-
-  ip_configuration {
-    name                          = "internal"
-    subnet_id                     = azurerm_subnet.ml_subnet.id
-    private_ip_address_allocation = "Dynamic"
-  }
+  workspace_id        = azurerm_log_analytics_workspace.ml_law.id
+  application_type    = "web"
 }
 
-
-# Virtual Machine
-resource "azurerm_linux_virtual_machine" "spot_vm" {
-  name                = "vm-worker"
-  admin_username      = "azureuser"
+# 5. Azure Container Registry (Used to store custom Python environments/Docker images)
+resource "azurerm_container_registry" "ml_acr" {
+  name                = "crmlws123"
   resource_group_name = azurerm_resource_group.ml_rg.name
   location            = local.resource_group_location
-  size                = local.virtual_machine.instance_type
-  priority            = local.virtual_machine.priority
-  eviction_policy     = local.virtual_machine.eviction_policy # Deletes the OS disk upon eviction to stop billing entirely
-  max_bid_price       = local.virtual_machine.max_bid_price   # Default to capacity-only eviction
+  sku                 = "Standard"
+  admin_enabled       = true
+}
 
-  admin_ssh_key {
-    username   = "azureuser"
-    public_key = file(local.vm_ssh_key_path)
-  }
+######### AZURE ML WORKSPACE & COMPUTE CLUSTER #########
 
-  network_interface_ids = [
-    azurerm_network_interface.ml_nic.id,
-  ]
+# 6. The Core Azure ML Workspace
+resource "azurerm_machine_learning_workspace" "ml_ws" {
+  name                    = "mlw-workspace"
+  location                = local.resource_group_location
+  resource_group_name     = azurerm_resource_group.ml_rg.name
+  application_insights_id = azurerm_application_insights.ml_appinsights.id
+  key_vault_id            = azurerm_key_vault.ml_kv.id
+  storage_account_id      = azurerm_storage_account.ml_storage.id
+  container_registry_id   = azurerm_container_registry.ml_acr.id
 
-  os_disk {
-    caching              = "ReadWrite"
-    storage_account_type = "Standard_LRS"
-  }
-
-  source_image_reference {
-    publisher = "Canonical"
-    offer     = "0001-com-ubuntu-server-jammy"
-    sku       = "22_04-lts"
-    version   = "latest"
-  }
-
-  # Attach the Managed Identity to this specific VM
   identity {
-    type         = "UserAssigned"
-    identity_ids = [azurerm_user_assigned_identity.vm_identity.id]
+    type = "SystemAssigned"
+  }
+}
+
+# 7. The Dynamic Compute Cluster
+# Scalable compute for model training
+resource "azurerm_machine_learning_compute_cluster" "ml_cluster" {
+  name                          = "ml-training-cluster"
+  location                      = local.resource_group_location
+  machine_learning_workspace_id = azurerm_machine_learning_workspace.ml_ws.id
+  
+  vm_size     = local.virtual_machine.instance_type
+  vm_priority = local.virtual_machine.vm_priority
+
+  scale_settings {
+    min_node_count                       = 0
+    max_node_count                       = 1
+    scale_down_nodes_after_idle_duration = "PT2M" 
+  }
+
+  identity {
+    type = "SystemAssigned"
   }
 }
