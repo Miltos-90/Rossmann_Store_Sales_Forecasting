@@ -1,6 +1,6 @@
 path:
   data_dir: C:/Users/m_kal/Downloads/datasets/rossmann-store-sales
-  artifact_dir: ./artifacts
+  artifact_dir: ./outputs
   stores: store.csv
   train: train.csv
   logs: hypertuning.log

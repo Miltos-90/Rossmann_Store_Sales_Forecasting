@@ -12,6 +12,11 @@ from sklearn.metrics import (
 
 import src
 
+# TODO: Remove hardcoding of stores to use in the main function.
+# TODO: Add command line argument to overwrite the data path in the config file.
+#       Then overwrite the data path in the config file with the
+#       command line argument if it exists in the main function..      
+
 
 def parse_args():
     """Parse command line arguments."""
