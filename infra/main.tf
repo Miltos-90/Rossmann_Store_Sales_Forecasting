@@ -44,6 +44,13 @@ resource "azurerm_storage_account" "ml_storage" {
   account_replication_type = "LRS"  # Locally Redundant Storage - the cheapest option for non-critical data
 }
 
+# 2.1 Storage Container (Used to store datasets like MNIST)
+resource "azurerm_storage_container" "ml_data_container" {
+  name                  = "data_container" # Target container name
+  storage_account_id    = azurerm_storage_account.ml_storage.id
+  container_access_type = "private"   # Keeps your datasets secure and private
+}
+
 # 3. Key Vault (Used to securely store storage account keys and secrets)
 data "azurerm_client_config" "current" {}
 
