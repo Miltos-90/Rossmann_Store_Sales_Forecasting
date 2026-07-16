@@ -1,15 +1,25 @@
 ######### CONSTANTS & PROVIDERS #########
 locals {
   resource_group_location = "eastus"
+  output_file_path        = "${path.module}/infra_config.json"
   
-  use_low_priority = true  # Low priority = Spot VMs, Dedicated = Standard VMs
+  # See Azure ML availability here: https://azure.microsoft.com/en-us/pricing/details/machine-learning/
+  # See Azure compute availability here: https://azure.microsoft.com/en-us/pricing/details/virtual-machines/linux/
+  # Names do not always match between the two pages. Azure ML has a limited set of VM types available for training.
+  use_spot = false  # Low priority = Spot VMs, Dedicated = Standard VMs.
 
-  virtual_machine = local.use_low_priority ? {
-    instance_type = "Standard_E16as_v7" # # E16as v7: 16 vCPUs, 128 GiB RAM, No storage
+  virtual_machine = local.use_spot ? {
+    instance_type = "STANDARD_E16A_V4" # 16 vCPUs, 128 GiB RAM, No storage
     vm_priority   = "LowPriority"
   } : {
-    instance_type = "Standard_B2ls_v2"  # B2ls v2: 2 vCPUs, 4 GiB RAM, No storage
-    vm_priority   = "Dedicated"         
+    instance_type = "STANDARD_F2S_V2"  # 2 vCPUs, 4 GiB RAM, No storage
+    vm_priority   = "Dedicated"
+  }
+
+  cluster_scale_settings = {
+    min_node_count                       = 0
+    max_node_count                       = 1
+    scale_down_nodes_after_idle_duration = "PT2M"  # ISO 8601 duration format (2 minutes)
   }
 }
 
@@ -29,15 +39,15 @@ provider "azurerm" {
 
 # 1. Resource Group
 resource "azurerm_resource_group" "ml_rg" {
-  name     = "rg-ml-workspace"
+  name     = "rg-ml-workspace-rossmann"
   location = local.resource_group_location
 }
 
-######### FOUNDATIONAL DEPENDENCIES #########
+######### AZURE ML STUDIO DEPENDENCIES #########
 
 # 2. Storage Account (Used for Datastores, scripts, and logs)
 resource "azurerm_storage_account" "ml_storage" {
-  name                     = "stmlws123"
+  name                     = "stmlws1233"
   resource_group_name      = azurerm_resource_group.ml_rg.name
   location                 = local.resource_group_location
   account_tier             = "Standard"
@@ -46,7 +56,7 @@ resource "azurerm_storage_account" "ml_storage" {
 
 # 2.1 Storage Container (Used to store datasets like MNIST)
 resource "azurerm_storage_container" "ml_data_container" {
-  name                  = "data_container" # Target container name
+  name                  = "datacontainer1233"
   storage_account_id    = azurerm_storage_account.ml_storage.id
   container_access_type = "private"   # Keeps your datasets secure and private
 }
@@ -55,7 +65,7 @@ resource "azurerm_storage_container" "ml_data_container" {
 data "azurerm_client_config" "current" {}
 
 resource "azurerm_key_vault" "ml_kv" {
-  name                        = "kv-ml-workspace-123"
+  name                        = "kv-ml-workspace-1233"
   location                    = local.resource_group_location
   resource_group_name         = azurerm_resource_group.ml_rg.name
   tenant_id                   = data.azurerm_client_config.current.tenant_id
@@ -81,7 +91,7 @@ resource "azurerm_application_insights" "ml_appinsights" {
 
 # 5. Azure Container Registry (Used to store custom Python environments/Docker images)
 resource "azurerm_container_registry" "ml_acr" {
-  name                = "crmlws123"
+  name                = "crmlws1233"
   resource_group_name = azurerm_resource_group.ml_rg.name
   location            = local.resource_group_location
   sku                 = "Standard"
@@ -105,8 +115,7 @@ resource "azurerm_machine_learning_workspace" "ml_ws" {
   }
 }
 
-# 7. The Dynamic Compute Cluster
-# Scalable compute for model training
+# 7. Compute Cluster
 resource "azurerm_machine_learning_compute_cluster" "ml_cluster" {
   name                          = "ml-training-cluster"
   location                      = local.resource_group_location
@@ -116,12 +125,49 @@ resource "azurerm_machine_learning_compute_cluster" "ml_cluster" {
   vm_priority = local.virtual_machine.vm_priority
 
   scale_settings {
-    min_node_count                       = 0
-    max_node_count                       = 1
-    scale_down_nodes_after_idle_duration = "PT2M" 
+    min_node_count                       = local.cluster_scale_settings.min_node_count
+    max_node_count                       = local.cluster_scale_settings.max_node_count
+    scale_down_nodes_after_idle_duration = local.cluster_scale_settings.scale_down_nodes_after_idle_duration
   }
 
   identity {
     type = "SystemAssigned"
   }
+}
+
+######### RBAC ROLE ASSIGNMENTS #########
+
+# 8. RBAC: allow Terraform caller (your current identity) to upload blobs
+resource "azurerm_role_assignment" "uploader_blob_contributor" {
+  scope                = "${azurerm_storage_account.ml_storage.id}/blobServices/default/containers/${azurerm_storage_container.ml_data_container.name}"
+  role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = data.azurerm_client_config.current.object_id
+}
+
+# 9. RBAC: allow AML workspace managed identity to read blobs
+resource "azurerm_role_assignment" "workspace_blob_reader" {
+  scope                = "${azurerm_storage_account.ml_storage.id}/blobServices/default/containers/${azurerm_storage_container.ml_data_container.name}"
+  role_definition_name = "Storage Blob Data Reader"
+  principal_id         = azurerm_machine_learning_workspace.ml_ws.identity[0].principal_id
+}
+
+# 10. RBAC: allow AML compute managed identity to read blobs (for ro_mount)
+resource "azurerm_role_assignment" "compute_blob_reader" {
+  scope                = "${azurerm_storage_account.ml_storage.id}/blobServices/default/containers/${azurerm_storage_container.ml_data_container.name}"
+  role_definition_name = "Storage Blob Data Reader"
+  principal_id         = azurerm_machine_learning_compute_cluster.ml_cluster.identity[0].principal_id
+}
+
+######### OUTPUT DUMP #########
+
+# Output the Azure ML Workspace name and resource group for easy reference
+resource "local_file" "ml_workspace_info" {
+  filename = local.output_file_path
+  content  = jsonencode({
+    resource_group = azurerm_resource_group.ml_rg.name
+    workspace_name = azurerm_machine_learning_workspace.ml_ws.name
+    compute_name   = azurerm_machine_learning_compute_cluster.ml_cluster.name
+    container_name = azurerm_storage_container.ml_data_container.name
+    storage_account_name = azurerm_storage_account.ml_storage.name
+  })
 }
