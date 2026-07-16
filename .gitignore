@@ -1,6 +1,8 @@
 .terraform*
 
+*.tfstate*
 outputs/
+infra_config.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

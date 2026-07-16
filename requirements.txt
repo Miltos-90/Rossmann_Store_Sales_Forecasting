@@ -8,3 +8,7 @@ xgboost==3.0.5
 optuna==4.8.0
 optuna-integration[xgboost]==4.8.0
 holidays==0.99
+dotenv==0.9.9
+azure-ai-ml==1.34.1
+azure-identity==1.25.3
+azure-storage-blob==12.30.0
