@@ -118,9 +118,11 @@ resource "azurerm_machine_learning_workspace" "ml_ws" {
   resource_group_name     = azurerm_resource_group.ml_rg.name
   application_insights_id = azurerm_application_insights.ml_appinsights.id
   key_vault_id            = azurerm_key_vault.ml_kv.id
-  storage_account_id      = azurerm_storage_account.ml_storage.id
-  container_registry_id   = azurerm_container_registry.ml_acr.id
+  storage_account_id           = azurerm_storage_account.ml_storage.id
+  container_registry_id        = azurerm_container_registry.ml_acr.id
+  storage_account_access_type  = "Identity"
   
+
   identity {
     type = "SystemAssigned"
   }
@@ -147,6 +149,10 @@ resource "azurerm_machine_learning_compute_cluster" "ml_cluster" {
 }
 
 ######### RBAC ROLE ASSIGNMENTS #########
+# NOTE: The following roles are automatically created by Azure ML and are NOT managed here:
+#   - Storage Blob Data Contributor     → workspace managed identity on the linked storage account
+#   - Storage File Data Privileged Contributor → workspace managed identity on the linked storage account
+#   - AcrPull                           → compute cluster managed identity on the linked ACR
 
 # 1. STORAGE: Allow Terraform caller (your current identity) to upload blobs
 resource "azurerm_role_assignment" "caller_blob_contributor" {
@@ -155,105 +161,62 @@ resource "azurerm_role_assignment" "caller_blob_contributor" {
   principal_id         = data.azurerm_client_config.current.object_id
 }
 
-# 2. STORAGE: Allow AML workspace managed identity to write artifacts, snapshots, and logs
-resource "azurerm_role_assignment" "workspace_blob_contributor" {
-  scope                = azurerm_storage_account.ml_storage.id
-  role_definition_name = "Storage Blob Data Contributor"
-  principal_id         = azurerm_machine_learning_workspace.ml_ws.identity[0].principal_id
-}
-
-# 3. STORAGE: Allow AML compute managed identity to write job outputs and checkpoints
+# 2. STORAGE: Allow AML compute managed identity to write job outputs and checkpoints
 resource "azurerm_role_assignment" "compute_blob_contributor" {
   scope                = azurerm_storage_account.ml_storage.id
   role_definition_name = "Storage Blob Data Contributor"
   principal_id         = azurerm_machine_learning_compute_cluster.ml_cluster.identity[0].principal_id
 }
 
-# 4. KEY VAULT: Allow your current identity (Terraform caller) to manage secrets
+# 3. KEY VAULT: Allow your current identity (Terraform caller) to manage secrets
+# NOTE: Not currently used by the Rossmann workload. Pre-provisioned for when external
+#       data source credentials or API keys need to be written into Key Vault.
 resource "azurerm_role_assignment" "caller_kv_secrets" {
   scope                = azurerm_key_vault.ml_kv.id
   role_definition_name = "Key Vault Secrets Officer"
   principal_id         = data.azurerm_client_config.current.object_id
 }
 
-# 5. KEY VAULT: Allow the Workspace Managed Identity to manage secrets
-resource "azurerm_role_assignment" "workspace_kv_secrets" {
-  scope                = azurerm_key_vault.ml_kv.id
-  role_definition_name = "Key Vault Secrets Officer"
-  principal_id         = azurerm_machine_learning_workspace.ml_ws.identity[0].principal_id
-}
-
-# 6. KEY VAULT: Allow AML Compute Cluster to access secrets
+# 4. KEY VAULT: Allow AML Compute Cluster to access secrets
+# NOTE: Not currently used by the Rossmann workload. Pre-provisioned for when training
+#       scripts need to read credentials or API keys from Key Vault at runtime.
 resource "azurerm_role_assignment" "compute_kv_secrets" {
   scope                = azurerm_key_vault.ml_kv.id
   role_definition_name = "Key Vault Secrets User"
   principal_id         = azurerm_machine_learning_compute_cluster.ml_cluster.identity[0].principal_id
 }
 
-# 7. REGISTRY: Allow AML Compute Cluster to pull Docker base images from ACR
-resource "azurerm_role_assignment" "compute_acr_pull" {
-  scope                = azurerm_container_registry.ml_acr.id
-  role_definition_name = "AcrPull"
-  principal_id         = azurerm_machine_learning_compute_cluster.ml_cluster.identity[0].principal_id
-}
-
-
-# 8. STORAGE (FILES): Allow AML workspace managed identity to write to Azure Files (Notebooks/Scripts)
-resource "azurerm_role_assignment" "workspace_file_contributor" {
-  scope                = azurerm_storage_account.ml_storage.id
-  role_definition_name = "Storage File Data Privileged Contributor"
-  principal_id         = azurerm_machine_learning_workspace.ml_ws.identity[0].principal_id
-}
-
-# 9. STORAGE (FILES): Allow Terraform caller to upload notebooks/scripts via Azure ML Studio UI
+# 5. STORAGE (FILES): Allow Terraform caller to upload notebooks/scripts via Azure ML Studio UI
+# NOTE: Not required for programmatic job submission. Needed if prototyping directly
+#       in the Studio notebook editor or uploading scripts through the Studio UI.
 resource "azurerm_role_assignment" "caller_file_contributor" {
   scope                = azurerm_storage_account.ml_storage.id
   role_definition_name = "Storage File Data Privileged Contributor"
   principal_id         = data.azurerm_client_config.current.object_id
 }
 
-# 10. REGISTRY: Upgrade Workspace from AcrPush to Contributor so it can trigger ACR Build Tasks
+# 6. REGISTRY: Allow Workspace to push custom environment images to ACR
 resource "azurerm_role_assignment" "workspace_acr_contributor" {
   scope                = azurerm_container_registry.ml_acr.id
-  role_definition_name = "Contributor"
+  role_definition_name = "AcrPush"
   principal_id         = azurerm_machine_learning_workspace.ml_ws.identity[0].principal_id
 }
 
-# 11. AML WORKSPACE: Allow Terraform caller to manage assets, submit jobs, and use the Studio UI
+# 7. AML WORKSPACE: Allow Terraform caller to manage assets, submit jobs, and use the Studio UI
 resource "azurerm_role_assignment" "caller_ml_admin" {
   scope                = azurerm_machine_learning_workspace.ml_ws.id
-  role_definition_name = "AzureML Workspace Admin"
+  role_definition_name = "AzureML Data Scientist"
   principal_id         = data.azurerm_client_config.current.object_id
 }
 
-# 12. STORAGE (MANAGEMENT): Allow AML workspace to list storage keys to configure default datastores
-# Define the Custom Role: Strictly limited to reading properties and listing keys
-resource "azurerm_role_definition" "ml_storage_key_reader" {
-  name        = "AML Storage Key Reader - ${azurerm_resource_group.ml_rg.name}"
-  scope       = azurerm_resource_group.ml_rg.id
-  description = "Allows AML workspace to list storage keys to configure default datastores without full Contributor access."
+######### AML ASSETS #########
 
-  permissions {
-    actions = [
-      "Microsoft.Storage/storageAccounts/read",
-      "Microsoft.Storage/storageAccounts/listkeys/action"
-    ]
-    not_actions = []
-  }
-}
-
-# 12. STORAGE (MANAGEMENT): Assign the custom least-privilege role to the workspace
-resource "azurerm_role_assignment" "workspace_storage_key_reader" {
-  scope              = azurerm_storage_account.ml_storage.id
-  role_definition_id = azurerm_role_definition.ml_storage_key_reader.role_definition_resource_id
-  principal_id       = azurerm_machine_learning_workspace.ml_ws.identity[0].principal_id
-}
-
-# 13. APP INSIGHTS: Allow AML workspace to configure telemetry routing
-resource "azurerm_role_assignment" "workspace_appinsights_contributor" {
-  scope                = azurerm_application_insights.ml_appinsights.id
-  role_definition_name = "Contributor"
-  principal_id         = azurerm_machine_learning_workspace.ml_ws.identity[0].principal_id
+# Register the data container as an AML Datastore with identity-based access
+resource "azurerm_machine_learning_datastore_blobstorage" "ml_datastore" {
+  name                  = azurerm_storage_container.ml_data_container.name
+  workspace_id          = azurerm_machine_learning_workspace.ml_ws.id
+  storage_container_id  = azurerm_storage_container.ml_data_container.id
+  service_data_auth_identity = "WorkspaceSystemAssignedIdentity"
 }
 
 ######### OUTPUTS #########
@@ -267,11 +230,12 @@ resource "local_file" "ml_workspace_info" {
     compute_name         = azurerm_machine_learning_compute_cluster.ml_cluster.name
     container_name       = azurerm_storage_container.ml_data_container.name
     storage_account_name = azurerm_storage_account.ml_storage.name
+    datastore_name       = azurerm_machine_learning_datastore_blobstorage.ml_datastore.name
   })
 
   # Automatically deletes the file during 'terraform destroy'
   provisioner "local-exec" {
     when    = destroy
-    command = "powershell -Command \"if (Test-Path '${self.filename}') { Remove-Item '${self.filename}' -Force }\""
+    command = "powershell -ExecutionPolicy Bypass -Command \"if (Test-Path '${self.filename}') { Remove-Item '${self.filename}' -Force }\""
   }
 }
