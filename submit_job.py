@@ -1,7 +1,7 @@
 
 from azure.ai.ml import MLClient, command, Input
 from azure.identity import DefaultAzureCredential
-from azure.ai.ml.entities import AzureBlobDatastore, Data
+from azure.ai.ml.entities import Data
 from azure.ai.ml.constants import AssetTypes
 from azure.storage.blob import BlobServiceClient
 
@@ -23,7 +23,7 @@ STORAGE_ACCOUNT_URI = f"https://{STORAGE_ACCOUNT_NAME}.blob.core.windows.net"
 LOCAL_DATA_PATH = "./data"  # Local folder to upload (ensure it exists)
 DESTINATION_BLOB_PATH = "rossmann/"  # Destination path inside the container
 
-DATASTORE_NAME = "data_container_datastore"  # Name for the Datastore that points to the custom container
+DATASTORE_NAME = config["datastore_name"]  # Registered by Terraform
 DATASTORE_URI = f"azureml://datastores/{DATASTORE_NAME}/paths/{DESTINATION_BLOB_PATH}"  # Path to the uploaded data in the datastore
 
 def main():
@@ -37,17 +37,7 @@ def main():
         workspace_name=WORKSPACE_NAME
     )
 
-    # 2. Register your custom Terraform container as a new Datastore
-    print("Registering custom datastore...")
-    custom_datastore = AzureBlobDatastore(
-        name=DATASTORE_NAME,
-        description="Datastore pointing to our custom data_container container",
-        account_name=STORAGE_ACCOUNT_NAME,
-        container_name=STORAGE_CONTAINER_NAME # Matches your Terraform container name!
-    )
-    ml_client.datastores.create_or_update(custom_datastore)
-
-    # 3. Upload local data and register it as a Data asset on the custom datastore.
+    # 2. Upload local data and register it as a Data asset on the custom datastore.
     #    Step 1: Upload the local folder to the custom container via the Azure Storage SDK.
     #    (Assumes the local ./data folder exists and azure-storage-blob is installed)
     
@@ -55,10 +45,11 @@ def main():
 
     print(f"Uploading local directory '{LOCAL_DATA_PATH}' to custom datastore container...")
 
-    storage_account_key = ml_client.datastores.get(DATASTORE_NAME).credentials.account_key
     blob_service = BlobServiceClient(
         account_url=STORAGE_ACCOUNT_URI,
-        credential=storage_account_key
+        credential=DefaultAzureCredential(),
+        max_single_put_size=4 * 1024 * 1024,
+        max_block_size=4 * 1024 * 1024
     )
     import os
     container_client = blob_service.get_container_client(STORAGE_CONTAINER_NAME)
@@ -82,7 +73,7 @@ def main():
     print(f"Data asset registered as: {registered_data_asset.name}")
     
 
-    # 4. Define the Command Job configuration
+    # 3. Define the Command Job configuration
     job = command(
         display_name="Generic ML Pipeline Run",
         experiment_name="generic-jobs",
@@ -110,7 +101,7 @@ def main():
         limits={"timeout": 3600} 
     )
 
-    # 5. Submit to Azure ML
+    # 4. Submit to Azure ML
     print("Submitting command job...")
     returned_job = ml_client.jobs.create_or_update(job)
     
