@@ -105,7 +105,7 @@ resource "azurerm_container_registry" "ml_acr" {
   name                = "crmlws1233"
   resource_group_name = azurerm_resource_group.ml_rg.name
   location            = local.resource_group_location
-  sku                 = "Standard"
+  sku                 = "Basic"
   admin_enabled       = true
 }
 
