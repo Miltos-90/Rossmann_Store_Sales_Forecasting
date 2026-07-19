@@ -1,9 +1,6 @@
 """ Training pipeline. """
 import argparse
-import os
 import logging
-import sys
-import optuna
 import pandas as pd
 
 from sklearn.metrics import (
@@ -12,11 +9,10 @@ from sklearn.metrics import (
 
 import src
 
-# TODO: Remove hardcoding of stores to use in the main function.
-# TODO: Add command line argument to overwrite the data path in the config file.
-#       Then overwrite the data path in the config file with the
-#       command line argument if it exists in the main function..      
+src.setup_logging()
+logger = logging.getLogger(__name__)
 
+# TODO: Remove hardcoding of stores to use in the main function. 
 
 def parse_args():
     """Parse command line arguments."""
@@ -25,11 +21,16 @@ def parse_args():
                         type=str, 
                         default="./config.yaml", 
                         help="Path to the configuration YAML file.")
-    
-    parser.add_argument("--data_dir",
+
+    parser.add_argument("--input_dir",
                         type=str,
                         default=None,
-                        help="Path to the local data directory. If provided, this will overwrite the data path in the config file.")
+                        help="Path to the local input directory. If provided, this will overwrite the data path in the config file.")
+
+    parser.add_argument("--output_dir",
+                        type=str,
+                        default=None,
+                        help="Path to the local output directory. If provided, this will overwrite the output path in the config file.")
 
     return parser.parse_args()
 
@@ -37,25 +38,7 @@ def parse_args():
 def main(args):
 
     """ Main function to run the training pipeline. """
-
-    # Load configuration and create artifact directory
-    config = src.AppSettings.from_yaml(args.config)
-    os.makedirs(config.path.artifact_dir, exist_ok=True)
-
-    # Overwrite data path in the config file if --data_dir argument is provided
-    if args.data_dir is not None:
-        config.path.data_dir = args.data_dir
-
-    # Set up logging
-    optuna.logging.set_verbosity(optuna.logging.WARNING)
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.StreamHandler(sys.stdout)
-        ]
-    )
-    logger = logging.getLogger(__name__)
+    config = src.make_config(args)
 
     # Read and preprocess the data
     sales, stores = src.load_data(config.path)
@@ -86,7 +69,7 @@ def main(args):
 
         src.optimize(study, X_train, y_train, cv_sizes, config)
 
-        booster = src.refit(X_train, y_train, study, config)
+        booster = src.refit(X_train, y_train, study, config)  # also saved in the output dir.
         preds   = src.predict(X_test, booster, trf)
 
         predictions.append(preds)
@@ -95,8 +78,8 @@ def main(args):
 
     # Store results table.
     actuals = df.set_index(['Store', 'Date'])['Sales']
-    results = pd.merge(left=actuals, left_index=True, 
-                       right=predictions, right_index=True,
+    results = pd.merge(left=actuals, right=predictions,
+                       left_index=True, right_index=True,
                        suffixes=('_actual', '_predicted')
                        ).sort_index()
 
@@ -104,10 +87,11 @@ def main(args):
     logger.info(f"Out-of-fold predictions saved to {config.path.predictions}")
 
     # Compute errors
-    act  = results["Sales_actual"].values
-    pred = results["Sales_predicted"].values
+    act      = results["Sales_actual"].values
+    pred     = results["Sales_predicted"].values
     err_mae  = mean_absolute_error(act, pred)
     err_rmse = root_mean_squared_error(act, pred)
+
     logger.info(f"Out-of-fold MAE: {err_mae:.2f}")
     logger.info(f"Out-of-fold RMSE: {err_rmse:.2f}")
 

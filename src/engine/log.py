@@ -42,8 +42,7 @@ def trial(
     logger.info(
         f"Trial {trial.number} finished | "
         f"rounds used: {best_n_rounds}, "
-        f"final {metric}: {final_loss:.4f} +- {final_loss_std:.4f}, "
-        f"best {metric}: {best_loss:.4f} at round {best_n_rounds}"
+        f"final {metric}: {final_loss:.4f} +- {final_loss_std:.4f} at round {best_n_rounds}"
     )
 
 

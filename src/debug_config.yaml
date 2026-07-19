@@ -1,15 +1,18 @@
 path:
-  data_dir: C:/Users/m_kal/Downloads/datasets/rossmann-store-sales
-  artifact_dir: ./outputs
-  stores: store.csv
-  train: train.csv
-  logs: hypertuning.log
-  predictions: predictions.csv
+# Input directory for the dataset. Can be overridden by the --input_dir argument when running main.py
+  input_dir: C:/Users/m_kal/Downloads/datasets/rossmann-store-sales
+  
+  # Directory where all outputs will be saved. Can be overridden by the --output_dir argument when running main.py
+  output_dir: ./outputs
+
+  stores: store.csv             # CSV file containing store information
+  train: train.csv              # CSV file containing training data
+  predictions: predictions.csv  # CSV file where predictions will be saved
 
 horizon: 30 # Forecast horizon in days
 
 feature_engineering:
-  windows:  # Rolling windows for feature engineering
+  windows:
     - "7D"
     - "14D"
     - "30D"
@@ -36,7 +39,7 @@ cross_validation:
   n_inner_splits: 2
 
 hypertuning:
-  num_trials: 3
+  num_trials: 2
   seed: 42
   monitor_periods: 100       # Number of periods to monitor during hyperparameter tuning.
   num_startup_trials: 1      # Number of trials to run before using the TPE sampler. These are used to explore the hyperparameter space randomly before the TPE algorithm starts to guide the search.
