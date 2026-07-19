@@ -25,6 +25,11 @@ def parse_args():
                         type=str, 
                         default="./config.yaml", 
                         help="Path to the configuration YAML file.")
+    
+    parser.add_argument("--data_dir",
+                        type=str,
+                        default=None,
+                        help="Path to the local data directory. If provided, this will overwrite the data path in the config file.")
 
     return parser.parse_args()
 
@@ -36,6 +41,10 @@ def main(args):
     # Load configuration and create artifact directory
     config = src.AppSettings.from_yaml(args.config)
     os.makedirs(config.path.artifact_dir, exist_ok=True)
+
+    # Overwrite data path in the config file if --data_dir argument is provided
+    if args.data_dir is not None:
+        config.path.data_dir = args.data_dir
 
     # Set up logging
     optuna.logging.set_verbosity(optuna.logging.WARNING)
