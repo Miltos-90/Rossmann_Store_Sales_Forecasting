@@ -40,10 +40,11 @@ cross_validation:
 
 hypertuning:
   num_trials: 2
+  timeout: 10800             # Timeout in seconds for hyperparameter tuning. If the tuning process exceeds this time, it will stop.
   seed: 42
   monitor_periods: 100       # Number of periods to monitor during hyperparameter tuning.
   num_startup_trials: 1      # Number of trials to run before using the TPE sampler. These are used to explore the hyperparameter space randomly before the TPE algorithm starts to guide the search.
-  num_jobs: -1               # Number of parallel jobs for hyperparameter tuning. -1 means using all available cores.
+  num_jobs: 2                # Number of parallel jobs for hyperparameter tuning. -1 means using all available cores.
   early_stopping_rounds: 10  # Number of rounds with no improvement after which training will be stopped during hyperparameter tuning.
   num_boost_rounds: 1000     # Maximum number of boosting rounds for XGBoost. The actual number of rounds will be determined by early stopping.
   refit_val_fraction: 0.1    # Fraction of the training data to be used as a validation set for early stopping during hyperparameter tuning.

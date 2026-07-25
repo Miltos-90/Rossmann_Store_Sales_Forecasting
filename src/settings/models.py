@@ -84,6 +84,7 @@ class CVSettings(BaseModel):
 
 class HypertuningSettings(BaseModel):
     num_trials:             PositiveInt
+    timeout:                PositiveInt
     seed:                   PositiveInt
     monitor_periods:        PositiveInt
     num_startup_trials:     PositiveInt

@@ -154,6 +154,9 @@ def optimize(
     obj_fcn = lambda trial: _objective(trial, X_train, y_train, inner_cv,
                                        study_name=study_name,
                                        config=config)
-    
-    study.optimize(obj_fcn, n_trials=remaining_trials, n_jobs=config.hypertuning.num_jobs)
+
+    study.optimize(obj_fcn,
+                   n_trials=remaining_trials,
+                   n_jobs=config.hypertuning.num_jobs,
+                   timeout=config.hypertuning.timeout)
     log.study(study)

@@ -39,8 +39,9 @@ cross_validation:
   n_inner_splits: 3
 
 hypertuning:
-  num_trials: 100
-  seed: 42
+  num_trials: 100            # Number of hyperparameter tuning trials to run. Each trial corresponds to a different set of hyperparameters being evaluated.
+  timeout: 10800             # Timeout in seconds for hyperparameter tuning. If the tuning process exceeds this time, it will stop.
+  seed: 42                   # Random seed for reproducibility of hyperparameter tuning results.
   monitor_periods: 100       # Number of periods to monitor during hyperparameter tuning.
   num_startup_trials: 5      # Number of trials to run before using the TPE sampler. These are used to explore the hyperparameter space randomly before the TPE algorithm starts to guide the search.
   num_jobs: -1               # Number of parallel jobs for hyperparameter tuning. -1 means using all available cores.

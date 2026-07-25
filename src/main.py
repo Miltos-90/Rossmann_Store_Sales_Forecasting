@@ -9,10 +9,10 @@ from sklearn.metrics import (
 
 import src
 
+
 src.setup_logging()
 logger = logging.getLogger(__name__)
 
-# TODO: Remove hardcoding of stores to use in the main function. 
 
 def parse_args():
     """Parse command line arguments."""
@@ -42,11 +42,6 @@ def main(args):
 
     # Read and preprocess the data
     sales, stores = src.load_data(config.path)
-    ################################################## TODO: Remove this hardcoding
-    stores_to_use = [1, 2, 3]
-    stores = stores[stores['Store'].isin(stores_to_use)]
-    ##################################################
-
     df = src.preprocess_data(sales, stores)
     X, y, trf = src.generate_dataset(df, config)
 
