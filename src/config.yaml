@@ -35,7 +35,7 @@ feature_engineering:
     language: en_US   # Language in which the holiday names will be returned - we use the holidays package.
 
 cross_validation:
-  n_outer_splits: 5
+  n_outer_splits: 3
   n_inner_splits: 3
 
 hypertuning:

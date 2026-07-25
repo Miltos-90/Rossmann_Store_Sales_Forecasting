@@ -4,6 +4,11 @@
 outputs/
 infra_config.json
 
+dataset
+infra
+ops
+environment
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
