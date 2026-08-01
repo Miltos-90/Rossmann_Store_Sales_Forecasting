@@ -1,5 +1,6 @@
 """ Training pipeline. """
 import argparse
+import os
 import logging
 import pandas as pd
 
@@ -7,12 +8,14 @@ from sklearn.metrics import (
     mean_absolute_error, root_mean_squared_error
 )
 
-import src
+from utils import load_data, generate_dataset, refit, setup_logging
+from engine import TimeSeriesCV, compute_cv_sizes, optimize, predict
+from preprocessing import preprocess_data
+from settings import AppSettings
 
 
-src.setup_logging()
+setup_logging()
 logger = logging.getLogger(__name__)
-
 
 def parse_args():
     """Parse command line arguments."""
@@ -24,13 +27,13 @@ def parse_args():
 
     parser.add_argument("--input_dir",
                         type=str,
-                        default=None,
-                        help="Path to the local input directory. If provided, this will overwrite the data path in the config file.")
+                        required=True,
+                        help="Path to the local input directory.")
 
     parser.add_argument("--output_dir",
                         type=str,
-                        default=None,
-                        help="Path to the local output directory. If provided, this will overwrite the output path in the config file.")
+                        required=True,
+                        help="Path to the local output directory.")
 
     return parser.parse_args()
 
@@ -38,20 +41,21 @@ def parse_args():
 def main(args):
 
     """ Main function to run the training pipeline. """
-    config = src.make_config(args)
+    config = AppSettings.from_yaml(args.config, args.input_dir, args.output_dir)
+    os.makedirs(config.path.output_dir, exist_ok=True)
 
     # Read and preprocess the data
-    sales, stores = src.load_data(config.path)
-    df = src.preprocess_data(sales, stores)
-    X, y, trf = src.generate_dataset(df, config)
+    sales, stores = load_data(config.path)
+    df = preprocess_data(sales, stores)
+    X, y, trf = generate_dataset(df, config)
 
     # Run nested cross-validation
     num_days = X.index.get_level_values("Date").nunique()
-    cv_sizes = src.compute_cv_sizes(num_days, config.horizon.days, config.cross_validation)
-    outer_cv = src.TimeSeriesCV(n_splits=config.cross_validation.n_outer_splits,
-                                gap=config.horizon.days,
-                                train_size=cv_sizes['outer_train'],
-                                test_size=cv_sizes['outer_test'])
+    cv_sizes = compute_cv_sizes(num_days, config.horizon.days, config.cross_validation)
+    outer_cv = TimeSeriesCV(n_splits=config.cross_validation.n_outer_splits,
+                            gap=config.horizon.days,
+                            train_size=cv_sizes['outer_train'],
+                            test_size=cv_sizes['outer_test'])
 
     predictions = []
     for fold, (train_idx, test_idx) in enumerate(outer_cv.split(X), start=1):
@@ -62,10 +66,10 @@ def main(args):
         y_train = y.iloc[train_idx]
         X_test  = X.iloc[test_idx]
 
-        src.optimize(study, X_train, y_train, cv_sizes, config)
+        optimize(study, X_train, y_train, cv_sizes, config)
 
-        booster = src.refit(X_train, y_train, study, config)  # also saved in the output dir.
-        preds   = src.predict(X_test, booster, trf)
+        booster = refit(X_train, y_train, study, config)  # also saved in the output dir.
+        preds   = predict(X_test, booster, trf)
 
         predictions.append(preds)
 

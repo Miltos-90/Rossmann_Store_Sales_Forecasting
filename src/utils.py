@@ -2,6 +2,7 @@
 """ Utility functions for the training pipeline. """
 
 import os
+import sys
 import logging
 
 import pandas as pd
@@ -10,12 +11,20 @@ import optuna
 
 from typing import Tuple
 
-from src.settings import PathSettings, AppSettings
-from src.engine import TargetTransformer
-from src.features import compute as compute_features
-from src.engine import study_storage, refit as _refit
+from settings import PathSettings, AppSettings
+from engine import TargetTransformer
+from features import compute as compute_features
+from engine import study_storage, refit as _refit
 
 logger = logging.getLogger(__name__)
+
+
+def setup_logging():
+    """Set up logging configuration."""
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+    logging.basicConfig(level=logging.INFO,
+                        format='%(asctime)s - %(levelname)s - %(message)s',
+                        handlers=[logging.StreamHandler(sys.stdout)])
 
 
 def load_data(path_config: PathSettings) -> Tuple[pd.DataFrame, pd.DataFrame]:

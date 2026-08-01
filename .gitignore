@@ -2,6 +2,7 @@
 
 *.tfstate*
 outputs/
+output/
 infra_config.json
 
 dataset

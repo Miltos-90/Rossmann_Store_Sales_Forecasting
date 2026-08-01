@@ -14,7 +14,7 @@ from optuna.samplers import TPESampler
 from sklearn.model_selection import BaseCrossValidator
 from optuna_integration.xgboost import XGBoostPruningCallback
 
-from src.settings.models import HyperparameterSpec, AppSettings
+from settings.models import HyperparameterSpec, AppSettings
 from .callbacks import BoosterCollector
 from .cv import TimeSeriesCV
 from . import log, checkpoint as ckpt

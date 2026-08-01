@@ -9,8 +9,8 @@ DataFrame with the generated features ready for modeling.
 import pandas as pd
 import numpy as np
 
-from src.settings import FeatureEngineeringSettings
-from src.features import from_target, from_holidays, from_store, from_calendar
+from settings import FeatureEngineeringSettings
+from features import from_target, from_holidays, from_store, from_calendar
 
 
 def compute(df: pd.DataFrame, 

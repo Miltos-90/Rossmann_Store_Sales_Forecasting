@@ -34,8 +34,8 @@ HorizonOffset = Annotated[
 
 # ---------- Models ----------
 class PathSettings(BaseModel):
-    input_dir: Path
-    output_dir: Path
+    input_dir:    Path
+    output_dir:   Path
     stores:       Path
     train:        Path
     predictions:  Path
@@ -154,14 +154,18 @@ class AppSettings(BaseModel):
     hyperparameters:     dict[str, HyperparameterSpec]
 
     @classmethod
-    def from_yaml(cls, path: str | Path) -> AppSettings:
+    def from_yaml(cls, config_path: str | Path, input_dir: str, output_dir: str) -> AppSettings:
         """
         Load settings from a YAML file and return an instance of AppSettings.
         Args:
-            path (str | Path): The path to the YAML configuration file.
+            config_path (str | Path): The path to the YAML configuration file.
+            input_dir (str): Path to the input directory (not stored in the config file).
+            output_dir (str): Path to the output directory (not stored in the config file).
         Returns:
             AppSettings: An instance of AppSettings populated with the data from the YAML file.
         """
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(config_path, "r", encoding="utf-8") as fh:
             data = yaml.safe_load(fh)
+        data["path"]["input_dir"] = input_dir
+        data["path"]["output_dir"] = output_dir
         return cls(**data)

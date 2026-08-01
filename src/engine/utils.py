@@ -5,8 +5,8 @@ import optuna
 import pandas as pd
 import xgboost as xgb
 
-from src.engine.target_transformer import TargetTransformer
-from src.settings import CVSettings, XGBSettings
+from engine.target_transformer import TargetTransformer
+from settings import CVSettings, XGBSettings
 
 logger = logging.getLogger(__name__)
 
