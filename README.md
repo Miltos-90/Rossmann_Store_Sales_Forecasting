@@ -1,8 +1,41 @@
 # Rossmann Store Sales Forecasting
 
-## Submit VM job
- 1. Upload: Upload the ML scripts and data package directly into the Azure Storage Container from the local machine
- 2. Trigger: Tell Azure's control plane to run a starter wrapper script on the ML 
-  
-  
-The VM wakes up, uses its assigned identity to download the ML package from the storage account, executes the training script, and drops the artifacts right back to the storage acount
+Predicting daily sales for 1,000+ Rossmann drugstores using historical sales, promotional data, and store metadata.
+
+---
+
+## Overview
+
+This repository contains an end-to-end Machine Learning pipeline trained on [Kaggle's Rossmann Store Sales](https://www.kaggle.com/c/rossmann-store-sales) dataset.
+
+The model is an XGBoost regressor tuned via nested time-series cross-validation. Hyperparameter search is driven by Optuna using a TPE sampler with a Median pruner to cut unpromising trials early. Each trial is evaluated inside an inner time-series CV loop; per-fold XGBoost boosters and CV histories are checkpointed to disk so runs are resumable. The best hyperparameters from each outer fold are used to retrain a final model on the full outer training window.
+
+---
+
+## Results Summary
+
+The model was evaluated on a held-out validation set covering ~1,115 stores across multiple weeks. Performance metrics:
+
+| Metric | Value |
+|--------|-------|
+| RMSE | 1,695.60 |
+| MAE | 805.77 |
+| MAPE (excl. zero-sales days) | 12.92% |
+
+Predictions track actual sales closely across the full range, with larger absolute errors concentrated in high-volume stores.
+
+<img src="assets/actual_vs_predicted.png" width="500">
+
+The stores with the lowest prediction error tend to have stable, lower-volume sales patterns, while the highest-error stores are typically high-volume with more volatile demand.
+
+<img src="assets/timeseries_lowest_mae.png" width="500">
+
+---
+
+## Quick Start
+
+1. **Clone & Install:**
+   ```bash
+   git clone [https://github.com/your-username/rossmann-sales-forecasting.git](https://github.com/your-username/rossmann-sales-forecasting.git)
+   cd rossmann-sales-forecasting
+   pip install -r requirements.txt
