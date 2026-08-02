@@ -30,6 +30,10 @@ The stores with the lowest prediction error tend to have stable, lower-volume sa
 
 <img src="assets/timeseries_lowest_mae.png" width="500">
 
+The hardest stores to predict are stores 909, 876, and 971, with MAEs of 4,286, 3,211, and 3,147 respectively — roughly 4–5× the average. These stores show large, irregular sales spikes that the model consistently under-predicts, or prolonged zero-sales periods (perhaps temporarily closed).
+
+<img src="assets/timeseries_highest_mae.png" width="500">
+
 ---
 
 ## Quick Start
