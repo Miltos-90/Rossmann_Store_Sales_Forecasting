@@ -104,11 +104,12 @@ def _objective(
 
     log.trial(trial=trial, metric=metric, history=history)
 
-    ckpt.trial(study_name=study_name,
-               trial=trial,
-               history=history,
-               boosters=booster_collector.cvfolds,
-               log_dir=config.path.output_dir)
+    if config.path.store_trial_artifacts:
+        ckpt.trial(study_name=study_name,
+                   trial=trial,
+                   history=history,
+                   boosters=booster_collector.cvfolds,
+                   log_dir=config.path.output_dir)
 
     return history[f"test-{metric}-mean"].min()
 

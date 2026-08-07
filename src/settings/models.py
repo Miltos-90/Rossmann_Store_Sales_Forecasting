@@ -34,11 +34,12 @@ HorizonOffset = Annotated[
 
 # ---------- Models ----------
 class PathSettings(BaseModel):
-    input_dir:    Path
-    output_dir:   Path
-    stores:       Path
-    train:        Path
-    predictions:  Path
+    input_dir:             Path
+    output_dir:            Path
+    stores:                Path
+    train:                 Path
+    predictions:           Path
+    store_trial_artifacts: bool
 
     @model_validator(mode="after")
     def _compute_derived_paths(self) -> PathSettings:

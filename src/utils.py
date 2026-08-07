@@ -61,14 +61,16 @@ def generate_dataset(df: pd.DataFrame, config: AppSettings):
 
     logger.info(f"Generating features and target variable.")
 
+    df_nonzero = df.loc[df['Sales']>0]  # Filter out rows where Sales is zero, as they are not useful for training the model.
+
     fh  = pd.DateOffset(days=-config.horizon.days)  # negative offset for forward difference
     trf = TargetTransformer(forecast_horizon=fh, anchor_col='lag_days_0')
     # The "anchor_col" is the column used to align the target variable with the features. 
     # In this case, we use 'lag_days_0' which represents the sales on the current day.
     # It will be generated in the feature engineering step.
-
-    y = df.set_index(['Store', 'Date'])['Sales']
-    X = (df
+    
+    y = df_nonzero.set_index(['Store', 'Date'])['Sales']
+    X = (df_nonzero
         .set_index(['Date'])
         .groupby('Store')
         .apply(lambda df: compute_features(df, config.feature_engineering, config.horizon)))

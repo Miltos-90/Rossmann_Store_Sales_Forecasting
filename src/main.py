@@ -81,6 +81,8 @@ def main(args):
                        left_index=True, right_index=True,
                        suffixes=('_actual', '_predicted')
                        ).sort_index()
+    is_closed = results["Sales_actual"] == 0
+    results.loc[is_closed, "Sales_predicted"] = 0  # Set predictions to 0 for closed stores (actual sales = 0)
 
     results.to_csv(config.path.predictions, index=True)
     logger.info(f"Out-of-fold predictions saved to {config.path.predictions}")

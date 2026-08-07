@@ -2,6 +2,7 @@ path:
   stores: store.csv             # CSV file containing store information
   train: train.csv              # CSV file containing training data
   predictions: predictions.csv  # CSV file where predictions will be saved
+  store_trial_artifacts: false  # Disable artifact storage in debug mode
 
 horizon: 30 # Forecast horizon in days
 

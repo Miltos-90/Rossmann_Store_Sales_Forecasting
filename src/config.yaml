@@ -2,6 +2,7 @@ path:
   stores: store.csv             # CSV file containing store information
   train: train.csv              # CSV file containing training data
   predictions: predictions.csv  # CSV file where predictions will be saved
+  store_trial_artifacts: false  # Whether to store trial artifacts (like model files, logs, etc.) for each hyperparameter tuning trial. If set to true, these artifacts will be saved for later analysis or debugging.
 
 horizon: 30 # Forecast horizon in days
 
@@ -58,8 +59,8 @@ hyperparameters:  # XGBoost hyperparameters to be tuned using Optuna
     log: false
   learning_rate:
     method: suggest_float
-    low: 1.0e-3
-    high: 5.0e-2
+    low: 5.0e-3
+    high: 2.0e-1
     log: true
   subsample:
     method: suggest_float
