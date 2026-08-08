@@ -68,7 +68,7 @@ def main(args):
 
         optimize(study, X_train, y_train, cv_sizes, config)
 
-        booster = refit(X_train, y_train, study, config)  # also saved in the output dir.
+        booster = refit(X_train, y_train, study, config)
         preds   = predict(X_test, booster, trf)
 
         predictions.append(preds)
@@ -77,12 +77,14 @@ def main(args):
 
     # Store results table.
     actuals = df.set_index(['Store', 'Date'])['Sales']
-    results = pd.merge(left=actuals, right=predictions,
+    results = pd.merge(left=actuals,    right=predictions,
                        left_index=True, right_index=True,
                        suffixes=('_actual', '_predicted')
                        ).sort_index()
+
+    # Set predictions to 0 for closed stores (actual sales = 0)
     is_closed = results["Sales_actual"] == 0
-    results.loc[is_closed, "Sales_predicted"] = 0  # Set predictions to 0 for closed stores (actual sales = 0)
+    results.loc[is_closed, "Sales_predicted"] = 0
 
     results.to_csv(config.path.predictions, index=True)
     logger.info(f"Out-of-fold predictions saved to {config.path.predictions}")

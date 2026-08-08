@@ -18,9 +18,9 @@ The model was evaluated on a held-out validation set covering ~1,115 stores acro
 
 | Metric | Value |
 |--------|-------|
-| RMSE | 1,695.60 |
-| MAE | 805.77 |
-| MAPE (excl. zero-sales days) | 12.92% |
+| RMSE | 951.30 |
+| MAE | 592.98 |
+| MAPE | 8.41% |
 
 Predictions track actual sales closely across the full range, with larger absolute errors concentrated in high-volume stores.
 
